@@ -109,19 +109,75 @@ bun run cli db save-artist '{
 }'
 ```
 
-#### c. Scrape 10 most recent posts
-For each of the first 10 posts on their profile:
+#### c. Scrape 10 most recent posts (Batch Method - ~5x faster)
 
-1. **Click on post** to open it
-2. **Extract post data:**
-   - Shortcode (from URL `/p/<shortcode>/`)
-   - Caption
-   - Likes count
-   - Comments count
-   - Hashtags (from caption)
-   - Posted date
+**Step 1: Extract all shortcodes from profile grid**
+```javascript
+// On profile page, get all post shortcodes at once
+window._shortcodes = Array.from(document.querySelectorAll('a[href*="/p/"]'))
+  .map(a => a.href.split('/p/')[1].split('/')[0]);
+window._shortcodes.slice(0, 10);  // First 10 posts
+```
 
-3. **Save post:**
+**Step 2: For each shortcode, navigate directly and extract**
+
+Navigate to `https://www.instagram.com/p/<shortcode>/` (no modal clicking needed)
+
+Wait 2 seconds for page load, then run this single JS call to extract ALL data + download image:
+
+```javascript
+(async function() {
+  await new Promise(r => setTimeout(r, 500));
+  var article = document.querySelector('article');
+  var text = article ? article.textContent : '';
+  var time = document.querySelector('time[datetime]');
+  var h1 = article ? article.querySelector('h1') : null;
+  // Parse likes/comments from "Like1.6KComment79Share" pattern
+  var idx = text.indexOf('Like');
+  var sub = idx >= 0 ? text.substring(idx + 4, idx + 30) : '';
+  var likesRaw = sub.split('Comment')[0] || '0';
+  var commentsRaw = sub.split('Comment')[1] ? sub.split('Comment')[1].split('Sha')[0] : '0';
+  function parseCount(s) {
+    s = s.trim();
+    if (s.includes('K')) return Math.round(parseFloat(s) * 1000);
+    if (s.includes('M')) return Math.round(parseFloat(s) * 1000000);
+    return parseInt(s.replace(/,/g, '')) || 0;
+  }
+  // Find and download largest image
+  var imgs = document.querySelectorAll('img');
+  var largest = null;
+  var maxArea = 0;
+  imgs.forEach(function(img) {
+    if (img.naturalWidth > 200) {
+      var area = img.naturalWidth * img.naturalHeight;
+      if (area > maxArea) { maxArea = area; largest = img; }
+    }
+  });
+  var imgSize = 'none';
+  if (largest && maxArea > 50000) {
+    var canvas = document.createElement('canvas');
+    canvas.width = largest.naturalWidth;
+    canvas.height = largest.naturalHeight;
+    canvas.getContext('2d').drawImage(largest, 0, 0);
+    var a = document.createElement('a');
+    a.href = canvas.toDataURL('image/jpeg', 0.9);
+    a.download = '<username>_<shortcode>.jpg';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    imgSize = largest.naturalWidth + 'x' + largest.naturalHeight;
+  }
+  return JSON.stringify({
+    postedAt: time ? time.getAttribute('datetime') : null,
+    caption: h1 ? h1.textContent : null,
+    likesCount: parseCount(likesRaw),
+    commentsCount: parseInt(commentsRaw) || 0,
+    imageSize: imgSize
+  });
+})()
+```
+
+**Step 3: Save post and move image**
 ```bash
 bun run cli db save-post '{
   "shortcode": "<shortcode>",
@@ -130,60 +186,20 @@ bun run cli db save-post '{
   "likesCount": <number>,
   "commentsCount": <number>,
   "postType": "image",
-  "postedAt": "<ISO datetime from time element>",
-  "hashtags": ["tag1", "tag2"]
+  "postedAt": "<ISO datetime>",
+  "hashtags": []
 }'
+
+bun run cli images move-download \
+  -f "<username>_<shortcode>.jpg" \
+  -a "<username>" \
+  -s "<shortcode>"
 ```
 
-4. **Extract post data and download image:**
-
-   Use JavaScript to extract likes, posted date, and download the image:
-   ```javascript
-   (async () => {
-     await new Promise(r => setTimeout(r, 1000));
-     // Get likes count
-     const likesEl = document.querySelector('section span span');
-     const likes = likesEl ? parseInt(likesEl.textContent.replace(/[^0-9]/g, '')) || 0 : 0;
-     // Get posted date from first time element
-     const timeEl = document.querySelector('time[datetime]');
-     const postedAt = timeEl ? timeEl.getAttribute('datetime') : null;
-     // Find and download largest image
-     const imgs = document.querySelectorAll('img');
-     let largest = null;
-     let maxArea = 0;
-     for (const img of imgs) {
-       if (img.naturalWidth > 200 && img.naturalHeight > 200) {
-         const area = img.naturalWidth * img.naturalHeight;
-         if (area > maxArea) { maxArea = area; largest = img; }
-       }
-     }
-     if (!largest || maxArea < 50000) return JSON.stringify({ likes, postedAt, image: null });
-     const canvas = document.createElement('canvas');
-     canvas.width = largest.naturalWidth;
-     canvas.height = largest.naturalHeight;
-     const ctx = canvas.getContext('2d');
-     ctx.drawImage(largest, 0, 0);
-     const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-     const a = document.createElement('a');
-     a.href = dataUrl;
-     a.download = '<username>_<shortcode>.jpg';
-     document.body.appendChild(a);
-     a.click();
-     document.body.removeChild(a);
-     return JSON.stringify({ likes, postedAt, image: largest.naturalWidth + 'x' + largest.naturalHeight });
-   })();
-   ```
-
-   Move to organized folder:
-   ```bash
-   bun run cli images move-download \
-     -f "<username>_<shortcode>.jpg" \
-     -a "<username>" \
-     -s "<shortcode>"
-   ```
-
-5. **Navigate to next post** using ArrowRight key or Next button
-6. **Wait 2 seconds** between posts to avoid rate limiting
+**Step 4: Repeat for remaining shortcodes**
+- Navigate to next post URL directly
+- No need for ArrowRight key navigation
+- Wait 2 seconds between posts to avoid rate limiting
 
 ### 5. Complete Job
 ```bash
