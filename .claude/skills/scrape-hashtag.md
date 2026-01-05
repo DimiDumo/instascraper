@@ -1,6 +1,6 @@
 # Scrape Hashtag Skill
 
-Discovers verified artists from Instagram hashtag pages, scrapes their recent 10 posts, and downloads images.
+Discovers emerging artists from Instagram hashtag pages who are ideal customers for GalleryTalk.io - artists building communities who need a platform to showcase, promote, and monetize their art beyond social media.
 
 ## Usage
 ```
@@ -8,6 +8,20 @@ Discovers verified artists from Instagram hashtag pages, scrapes their recent 10
 ```
 
 Example: `/scrape-hashtag oilpainting`
+
+## Target Artist Profile (GalleryTalk.io Fit)
+
+We're looking for **emerging artists** who:
+- Are building an audience but struggle to showcase beyond social media
+- Create original artwork (not reposts or promotional content)
+- Would benefit from an immersive virtual gallery experience
+- Have engaged followers who might donate or purchase art
+
+**NOT looking for:**
+- Art galleries, museums, or marketplaces (like Saatchi Art, Artsy)
+- Art supply stores or print shops
+- Curators, art magazines, or media accounts
+- Massive accounts that are already established
 
 ## Prerequisites
 - User must be logged into Instagram in Chrome
@@ -29,29 +43,58 @@ Use Claude in Chrome MCP:
 3. `navigate` to `https://www.instagram.com/explore/tags/<hashtag_name>/`
 4. Wait 3 seconds for page load
 
-### 3. Discover Verified Artists
+### 3. Discover Emerging Artists
+
 For each post in the hashtag grid:
 
 1. **Click on post** to open modal
-2. **Check for verified badge** (blue checkmark next to username)
-3. **If verified:**
-   - Note the username
-   - Navigate to their profile: `https://www.instagram.com/<username>/`
-   - Run the artist scraping flow (see below)
-4. **If not verified:** Close modal (press Escape), continue to next post
-5. Continue until finding 5-10 verified artists
+2. **Get the username** from the post header
+3. **Navigate to their profile**: `https://www.instagram.com/<username>/`
+4. **Evaluate if they qualify** using the criteria below
+5. **If qualifies:** Run the artist scraping flow
+6. **If not:** Go back to hashtag page, continue to next post
+7. Continue until finding 5-10 qualifying artists
 
-### 4. Scrape Verified Artist Profile
-For each verified artist found:
+#### Qualification Criteria
+
+**MUST HAVE (all required):**
+- [ ] **Followers: 1,000 - 100,000** (emerging artist range)
+- [ ] **Bio indicates individual artist** - contains keywords like:
+  - "artist", "painter", "sculptor", "illustrator"
+  - "fine art", "contemporary art", "visual artist"
+  - "oil painting", "acrylic", "watercolor", "mixed media"
+  - Art medium mentions (canvas, ceramic, photography as art)
+- [ ] **Content is original artwork** - their posts show their own creations
+
+**SKIP IF ANY:**
+- [ ] Bio contains: "gallery", "museum", "shop", "store", "marketplace"
+- [ ] Bio contains: "curator", "magazine", "media", "agency", "prints for sale"
+- [ ] Bio contains: "art supplies", "framing", "commission closed"
+- [ ] Username/name suggests business: ends in "gallery", "art", "studio" (as a business)
+- [ ] Content is primarily reposts, quotes, or promotional material
+- [ ] Follower count < 1,000 (too small, not ready)
+- [ ] Follower count > 100,000 (already established)
+- [ ] Verified badge with business indicators (likely a company, not emerging artist)
+
+**GOOD SIGNS (bonus, not required):**
+- Links to personal portfolio or Linktree
+- Mentions commissions, prints, or "DM for inquiries"
+- Active engagement (recent posts, responds to comments)
+- Uses hashtags like #emergingartist, #artistsoninstagram
+- Has a cohesive artistic style/brand
+
+### 4. Scrape Qualifying Artist Profile
+
+For each qualifying artist:
 
 #### a. Extract profile data
-Use `read_page` to get:
+Use `read_page` or JavaScript to get:
 - Username
 - Full name
 - Bio
 - Followers/following count
 - Posts count
-- Verified status (should be true)
+- Profile picture URL
 
 #### b. Save artist
 ```bash
@@ -62,7 +105,7 @@ bun run cli db save-artist '{
   "followersCount": <number>,
   "followingCount": <number>,
   "postsCount": <number>,
-  "isVerified": true
+  "isVerified": false
 }'
 ```
 
@@ -87,46 +130,51 @@ bun run cli db save-post '{
   "likesCount": <number>,
   "commentsCount": <number>,
   "postType": "image",
+  "postedAt": "<ISO datetime from time element>",
   "hashtags": ["tag1", "tag2"]
 }'
 ```
 
-4. **Download image:**
+4. **Extract post data and download image:**
 
-   a. Click on the image to open full-resolution in new tab
-
-   b. Run JavaScript to capture and download:
+   Use JavaScript to extract likes, posted date, and download the image:
    ```javascript
    (async () => {
-     const img = document.querySelector('img');
-     if (!img) return 'no image';
-     await new Promise(r => img.complete ? r() : img.onload = r);
+     await new Promise(r => setTimeout(r, 1000));
+     // Get likes count
+     const likesEl = document.querySelector('section span span');
+     const likes = likesEl ? parseInt(likesEl.textContent.replace(/[^0-9]/g, '')) || 0 : 0;
+     // Get posted date from first time element
+     const timeEl = document.querySelector('time[datetime]');
+     const postedAt = timeEl ? timeEl.getAttribute('datetime') : null;
+     // Find and download largest image
+     const imgs = document.querySelectorAll('img');
+     let largest = null;
+     let maxArea = 0;
+     for (const img of imgs) {
+       if (img.naturalWidth > 200 && img.naturalHeight > 200) {
+         const area = img.naturalWidth * img.naturalHeight;
+         if (area > maxArea) { maxArea = area; largest = img; }
+       }
+     }
+     if (!largest || maxArea < 50000) return JSON.stringify({ likes, postedAt, image: null });
      const canvas = document.createElement('canvas');
-     canvas.width = img.naturalWidth;
-     canvas.height = img.naturalHeight;
+     canvas.width = largest.naturalWidth;
+     canvas.height = largest.naturalHeight;
      const ctx = canvas.getContext('2d');
-     ctx.drawImage(img, 0, 0);
-     window.__imageData = canvas.toDataURL('image/jpeg', 0.9);
-     return 'Image captured: ' + img.naturalWidth + 'x' + img.naturalHeight;
-   })();
-   ```
-
-   c. Trigger download:
-   ```javascript
-   (() => {
-     const dataUrl = window.__imageData;
-     if (!dataUrl) return 'no image data';
+     ctx.drawImage(largest, 0, 0);
+     const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
      const a = document.createElement('a');
      a.href = dataUrl;
      a.download = '<username>_<shortcode>.jpg';
      document.body.appendChild(a);
      a.click();
      document.body.removeChild(a);
-     return 'Download triggered';
+     return JSON.stringify({ likes, postedAt, image: largest.naturalWidth + 'x' + largest.naturalHeight });
    })();
    ```
 
-   d. Move to organized folder:
+   Move to organized folder:
    ```bash
    bun run cli images move-download \
      -f "<username>_<shortcode>.jpg" \
@@ -134,7 +182,7 @@ bun run cli db save-post '{
      -s "<shortcode>"
    ```
 
-5. **Navigate back** to profile (press back or navigate)
+5. **Navigate to next post** using ArrowRight key or Next button
 6. **Wait 2 seconds** between posts to avoid rate limiting
 
 ### 5. Complete Job
@@ -153,9 +201,46 @@ bun run cli job complete <job_id> <total_artists_scraped>
 ```
 
 Database records:
-- `artists` - Verified artist profiles
-- `posts` - Post metadata linked to artist
-- `images` - Image URLs and local paths linked to posts
+- `artists` - Emerging artist profiles (GalleryTalk.io prospects)
+- `posts` - Post metadata with `image_local_path` linking to downloaded image
+
+## Example Qualifying vs Non-Qualifying
+
+**QUALIFIES:**
+```
+@marina.creates.art
+Followers: 8,432
+Bio: "Oil painter | NYC | Exploring light & shadow | Commissions open | Shop link in bio"
+Content: Original oil paintings, studio shots, work in progress
+→ Perfect GalleryTalk.io customer
+```
+
+**SKIP:**
+```
+@saatchiart
+Followers: 1,100,000
+Bio: "World's leading online art gallery"
+Content: Curated posts from various artists
+→ This is a marketplace/competitor, not a customer
+```
+
+**SKIP:**
+```
+@artsy_gallery_nyc
+Followers: 45,000
+Bio: "Contemporary Art Gallery | Exhibitions & Sales | NYC"
+Content: Gallery installations, artist features
+→ This is a physical gallery, not an emerging artist
+```
+
+**SKIP:**
+```
+@tiny_art_beginner
+Followers: 287
+Bio: "Just started painting!"
+Content: Hobby artwork
+→ Too small, not ready for platform yet
+```
 
 ## Error Handling
 
@@ -169,3 +254,20 @@ Common issues:
 - **Rate limited**: Increase delay between requests
 - **Post unavailable**: Skip and continue
 - **Download failed**: Retry or skip image
+- **No qualifying artists found**: Try a different hashtag with more emerging artists
+
+## Recommended Hashtags for Finding Emerging Artists
+
+Good hashtags to try:
+- `#emergingartist` (though many won't qualify on followers)
+- `#artistsoninstagram`
+- `#oilpainting`, `#acrylicpainting`, `#watercolorart`
+- `#contemporaryart`, `#modernart`
+- `#abstractart`, `#figurativeart`
+- `#studiolife`, `#artstudio`
+- `#artistlife`, `#paintingprocess`
+
+Avoid hashtags dominated by galleries/businesses:
+- `#artforsale` (too commercial)
+- `#artcollector` (collectors, not artists)
+- `#galleryart` (galleries dominate)

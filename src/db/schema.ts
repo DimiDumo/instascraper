@@ -40,6 +40,7 @@ export const posts = sqliteTable(
     likesCount: integer("likes_count"),
     commentsCount: integer("comments_count"),
     postType: text("post_type", { enum: ["image", "video", "carousel"] }).default("image"),
+    imageLocalPath: text("image_local_path"),
     postedAt: integer("posted_at", { mode: "timestamp" }),
     scrapedAt: integer("scraped_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),

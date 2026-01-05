@@ -92,6 +92,13 @@ export function getPostsByArtist(artistId: number) {
   }).sync();
 }
 
+export function updatePostImagePath(shortcode: string, localPath: string) {
+  db.update(posts)
+    .set({ imageLocalPath: localPath, updatedAt: new Date() })
+    .where(eq(posts.shortcode, shortcode))
+    .run();
+}
+
 // ============ IMAGES ============
 
 export function insertImage(data: NewImage) {

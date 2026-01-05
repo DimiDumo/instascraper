@@ -2,7 +2,24 @@
 
 ## Purpose
 
-This tool discovers verified artists on Instagram for [GalleryTalk.io](https://gallerytalk.io) - a virtual 3D gallery platform where users can walk through AI-curated exhibitions of real artwork. We scrape verified artists (blue checkmark) to ensure we're featuring legitimate, professional artists.
+This tool discovers **emerging artists** on Instagram who are ideal customers for [GalleryTalk.io](https://gallerytalk.io) - a virtual 3D gallery platform that empowers artists to create interactive galleries to showcase, promote, and monetize their art.
+
+### Target Customer Profile
+
+We're looking for **emerging artists** (1,000 - 100,000 followers) who:
+- Are building an audience but struggle to showcase beyond social media
+- Create original artwork (painters, sculptors, illustrators, etc.)
+- Would benefit from an immersive virtual gallery experience
+- Have engaged followers who might donate or purchase art
+
+**NOT looking for:**
+- Art galleries, museums, or marketplaces (Saatchi Art, Artsy, etc.)
+- Art supply stores, print shops, or framing businesses
+- Curators, art magazines, or media accounts
+- Accounts with 100K+ followers (already established)
+- Accounts with <1K followers (not ready yet)
+
+> **Note:** We do NOT filter by Instagram's blue checkmark. Verification badges typically go to businesses and celebrities, not emerging artists.
 
 ## Tech Stack
 
@@ -27,11 +44,26 @@ bun run db:studio
 
 ## Workflow Overview
 
-1. **Start from hashtag** (e.g., `#oilpainting`) to discover artists
-2. **Find verified artists** (blue checkmark) in the hashtag feed
-3. **Scrape 10 recent posts** per verified artist
+1. **Start from hashtag** (e.g., `#oilpainting`, `#emergingartist`) to discover artists
+2. **Evaluate each artist** against qualification criteria (followers, bio, content)
+3. **Scrape 10 recent posts** per qualifying artist
 4. **Download artwork images** to local storage
-5. **Link everything** in the database for later curation
+5. **Link everything** in the database for later outreach/curation
+
+## Artist Qualification Criteria
+
+### MUST HAVE (all required):
+- Followers: **1,000 - 100,000**
+- Bio indicates individual artist (contains: "artist", "painter", "sculptor", etc.)
+- Content is original artwork
+
+### SKIP IF ANY:
+- Bio contains: "gallery", "museum", "shop", "marketplace", "curator"
+- Username suggests business (ends in "gallery", "studio" as a business)
+- Follower count outside 1K-100K range
+- Content is reposts or promotional material
+
+See `.claude/skills/scrape-hashtag.md` for detailed criteria and examples.
 
 ## Key Commands
 
@@ -53,9 +85,8 @@ bun run cli job list
 
 ## Database Schema
 
-- **artists**: Verified Instagram profiles (username, bio, followers, etc.)
-- **posts**: Individual posts linked to artists (shortcode, caption, likes)
-- **images**: Image URLs and local paths linked to posts
+- **artists**: Emerging artist profiles (username, bio, followers, etc.)
+- **posts**: Individual posts linked to artists, with `image_local_path` for downloaded image
 - **hashtags**: Tracked hashtags with post counts
 - **post_hashtags**: Junction table linking posts to hashtags
 - **scrape_jobs**: Job tracking for scrape operations
@@ -64,10 +95,10 @@ bun run cli job list
 
 Instagram CDN URLs require session authentication. The workflow:
 
-1. Use JavaScript `fetch()` inside the browser (has session cookies)
-2. Convert response to dataURL via FileReader
-3. Trigger browser download via anchor element click
-4. Move file from Downloads to organized folder using CLI
+1. Use canvas capture inside the browser (has session cookies)
+2. Convert to dataURL and trigger download
+3. Move file from Downloads to organized folder using CLI
+4. `moveFromDownloads()` automatically updates `image_local_path` on the post
 
 ```
 ./data/images/{username}/{shortcode}_0.jpg
@@ -77,7 +108,7 @@ Instagram CDN URLs require session authentication. The workflow:
 
 ### /scrape-hashtag <name>
 
-Discovers verified artists from a hashtag page and scrapes their recent posts.
+Discovers emerging artists from a hashtag page and scrapes their recent posts.
 
 See `.claude/skills/scrape-hashtag.md` for the full workflow.
 
@@ -132,3 +163,4 @@ Common issues:
 - **Login required**: Log into Instagram in Chrome first
 - **Rate limited**: Increase delays between requests
 - **Extension disconnected**: Restart Chrome and reconnect MCP
+- **No qualifying artists**: Try different hashtags (see skill for recommendations)

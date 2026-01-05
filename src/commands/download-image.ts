@@ -1,6 +1,6 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { updateImageLocalPath, getImagesByPost, getPostByShortcode } from "../db";
+import { updateImageLocalPath, getImagesByPost, getPostByShortcode, updatePostImagePath } from "../db";
 
 const IMAGE_DIR = process.env.IMAGE_DIR || "./data/images";
 
@@ -160,6 +160,9 @@ export async function moveFromDownloads(
   await Bun.write(sourcePath, "").then(() => {
     require("fs").unlinkSync(sourcePath);
   }).catch(() => {});
+
+  // Update the post's image_local_path in the database
+  updatePostImagePath(shortcode, localPath);
 
   console.log(`Image saved: ${localPath}`);
   return localPath;
