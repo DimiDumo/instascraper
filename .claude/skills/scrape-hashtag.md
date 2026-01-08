@@ -12,16 +12,17 @@ Example: `/scrape-hashtag oilpainting`
 ## Target Artist Profile (GalleryTalk.io Fit)
 
 We're looking for **emerging artists** who:
-- Are building an audience but struggle to showcase beyond social media
-- Create original artwork (not reposts or promotional content)
-- Would benefit from an immersive virtual gallery experience
-- Have engaged followers who might donate or purchase art
+- Create original visual art (painting, drawing, photography, printmaking, illustration, mixed media)
+- Have 1,000-50,000 followers (emerging artist sweet spot)
+- Show consistent artistic output and style
+- Would benefit from an immersive virtual 3D gallery experience
 
 **NOT looking for:**
-- Art galleries, museums, or marketplaces (like Saatchi Art, Artsy)
-- Art supply stores or print shops
-- Curators, art magazines, or media accounts
-- Massive accounts that are already established
+- AI-generated art accounts (Midjourney, Stable Diffusion, etc.)
+- Art galleries, museums, or marketplaces
+- 3D artists, sculptors, installation artists (GalleryTalk focuses on "flat work")
+- NFT-focused artists, graphic designers, fan art accounts
+- Fake/bot accounts with generic bios
 
 ## Prerequisites
 - User must be logged into Instagram in Chrome
@@ -50,38 +51,125 @@ For each post in the hashtag grid:
 1. **Click on post** to open modal
 2. **Get the username** from the post header
 3. **Navigate to their profile**: `https://www.instagram.com/<username>/`
-4. **Evaluate if they qualify** using the criteria below
-5. **If qualifies:** Run the artist scraping flow
-6. **If not:** Go back to hashtag page, continue to next post
-7. Continue until finding 5-10 qualifying artists
+4. **Quick filter check**: Followers must be 1,000-50,000
+5. **Extract profile data + 10 recent captions** for AI evaluation
+6. **Run AI qualification** using the prompt below
+7. **If score >= 70:** Run the artist scraping flow
+8. **If score 40-69:** Flag for manual review, skip for now
+9. **If score < 40:** Skip and continue to next post
+10. Continue until finding 5-10 qualifying artists
 
-#### Qualification Criteria
+#### AI-Powered Artist Qualification
 
-**MUST HAVE (all required):**
-- [ ] **Followers: 1,000 - 100,000** (emerging artist range)
-- [ ] **Bio indicates individual artist** - contains keywords like:
-  - "artist", "painter", "sculptor", "illustrator"
-  - "fine art", "contemporary art", "visual artist"
-  - "oil painting", "acrylic", "watercolor", "mixed media"
-  - Art medium mentions (canvas, ceramic, photography as art)
-- [ ] **Content is original artwork** - their posts show their own creations
+After extracting profile data and captions, use this prompt to evaluate the artist:
 
-**SKIP IF ANY:**
-- [ ] Bio contains: "gallery", "museum", "shop", "store", "marketplace"
-- [ ] Bio contains: "curator", "magazine", "media", "agency", "prints for sale"
-- [ ] Bio contains: "art supplies", "framing", "commission closed"
-- [ ] Username/name suggests business: ends in "gallery", "art", "studio" (as a business)
-- [ ] Content is primarily reposts, quotes, or promotional material
-- [ ] Follower count < 1,000 (too small, not ready)
-- [ ] Follower count > 100,000 (already established)
-- [ ] Verified badge with business indicators (likely a company, not emerging artist)
+```
+You are an art market analyst evaluating whether an Instagram account represents a genuine emerging artist who would benefit from GalleryTalk.io - a virtual 3D gallery platform where artists showcase and sell their work while connecting face-to-face with collectors.
 
-**GOOD SIGNS (bonus, not required):**
-- Links to personal portfolio or Linktree
-- Mentions commissions, prints, or "DM for inquiries"
-- Active engagement (recent posts, responds to comments)
-- Uses hashtags like #emergingartist, #artistsoninstagram
-- Has a cohesive artistic style/brand
+## Artist Data Provided:
+- Name: [NAME]
+- Instagram handle: [HANDLE]
+- Follower count: [NUMBER]
+- Bio: [BIO TEXT]
+- Last 10 post captions: [CAPTIONS]
+
+## Evaluation Criteria:
+
+### ✅ POSITIVE SIGNALS (Likely to try GalleryTalk):
+- Creates original visual art (painting, drawing, photography, printmaking, illustration, mixed media)
+- Shows consistent artistic output and style
+- Mentions being an artist, painter, photographer, visual creator in bio
+- Posts include artist statements, process shots, or behind-the-scenes content
+- Engages with their audience (asks questions, responds to comments based on caption tone)
+- Mentions selling work, commissions, exhibitions, or galleries
+- Has 1,000-50,000 followers (emerging artist sweet spot)
+- Posts regularly about their art journey or creative process
+- Located in a real place (city/country mentioned)
+- Uses authentic, personal language in captions
+- Mentions seeking galleries, collectors, or exposure
+
+### ⚠️ NEUTRAL SIGNALS (Need more context):
+- Very minimal captions (just emojis or hashtags)
+- Mix of personal and art content
+- Follower count above 50K (may already have representation)
+- Student or recent graduate (might be interested but less budget)
+
+### ❌ NEGATIVE SIGNALS (Filter out):
+- **AI-generated art red flags:**
+  - Bio mentions "AI artist," "digital art created with AI," "AI-generated," "midjourney," "stable diffusion," "generative art"
+  - Captions discuss prompts, AI tools, or generation techniques
+  - Extremely high post frequency (multiple posts per day of "new" finished work)
+  - Inconsistent style across posts (wildly different techniques/mediums)
+- **Fake/bot accounts:**
+  - Generic bio with no personal information
+  - Excessive hashtags with no personal text
+  - Random follower/following ratio (e.g., 50K followers, following 50K)
+  - Bio is just emojis or links with no description
+  - Captions are only promotional or link spam
+- **Not target audience:**
+  - 3D artists, sculptors, installation artists (GalleryTalk focuses on "flat work")
+  - NFT-focused artists (explicitly NFT-centric accounts)
+  - Art collectors, galleries, or curators (not creators)
+  - Graphic designers, UX/UI designers (commercial, not fine art)
+  - Street artists, graffiti artists (work doesn't translate to digital galleries)
+  - Fan art or meme accounts
+  - Crafts, jewelry, fashion designers
+  - Very low follower count (<500) with no engagement
+  - Inactive accounts (no posts in last 3+ months)
+
+## Output Format (JSON only):
+{
+  "qualified": true,
+  "confidence": "high",
+  "score": 85,
+  "primary_reason": "Active oil painter from Berlin with engaged following, mentions exhibitions and commissions",
+  "red_flags": [],
+  "green_flags": ["Original artwork", "Sells commissions", "Process documentation", "Engaged captions"],
+  "recommended_action": "send_outreach",
+  "art_medium": "painting",
+  "personalization_hook": "Your recent urban solitude series shows beautiful attention to light and shadow"
+}
+
+## Field Definitions:
+- **qualified**: boolean - Is this artist a good fit for outreach?
+- **confidence**: "high"/"medium"/"low" - How confident are you in this assessment?
+- **score**: 0-100 - Overall qualification score
+- **primary_reason**: One clear sentence explaining the decision
+- **red_flags**: Array of concerns or negative signals found
+- **green_flags**: Array of positive signals that indicate good fit
+- **recommended_action**: "send_outreach" / "review_manually" / "discard"
+- **art_medium**: "painting" / "photography" / "illustration" / "mixed" / "unknown"
+- **personalization_hook**: A specific detail about their work to use in outreach (only if qualified)
+
+## Scoring Guide:
+- **80-100**: Strong candidate - Clear emerging artist, engaged audience, sells or seeks to sell
+- **60-79**: Good candidate - Artist with potential but some uncertainty
+- **40-59**: Borderline - Requires manual review
+- **20-39**: Weak candidate - Not ideal fit but not fake
+- **0-19**: Discard - AI art, fake account, or wrong audience
+
+## Decision Logic:
+- If score >= 70 AND no major red flags: qualified = true, recommended_action = "send_outreach"
+- If score 40-69: qualified = false, recommended_action = "review_manually"
+- If score < 40: qualified = false, recommended_action = "discard"
+- Any AI art mention: automatic score < 20, discard
+- Any clear bot/fake signals: automatic score < 20, discard
+
+Return ONLY the JSON object, no additional text.
+```
+
+#### Extract Captions for Evaluation
+
+Before running AI qualification, extract the last 10 post captions:
+
+```javascript
+// On profile page, click first post then navigate through
+// For each post, extract caption from h1 element in article
+var h1 = document.querySelector('article h1');
+var caption = h1 ? h1.textContent : '';
+```
+
+Or use the batch method to get captions quickly by navigating to each post URL directly.
 
 ### 4. Scrape Qualifying Artist Profile
 
@@ -109,97 +197,132 @@ bun run cli db save-artist '{
 }'
 ```
 
-#### c. Scrape 10 most recent posts (Batch Method - ~5x faster)
+#### c. Scrape 10 most recent posts (Fast Grid Method - ~10x faster)
 
-**Step 1: Extract all shortcodes from profile grid**
-```javascript
-// On profile page, get all post shortcodes at once
-window._shortcodes = Array.from(document.querySelectorAll('a[href*="/p/"]'))
-  .map(a => a.href.split('/p/')[1].split('/')[0]);
-window._shortcodes.slice(0, 10);  // First 10 posts
-```
+This method extracts image URLs directly from the profile grid and downloads via curl, avoiding the need to click into each post.
 
-**Step 2: For each shortcode, navigate directly and extract**
+**Step 1: Extract shortcodes, URLs, and alt text from grid**
 
-Navigate to `https://www.instagram.com/p/<shortcode>/` (no modal clicking needed)
-
-Wait 2 seconds for page load, then run this single JS call to extract ALL data + download image:
+Run this JavaScript to log URLs to console AND return alt text (MCP blocks URLs in return values, but console.log works for URLs while alt text returns normally):
 
 ```javascript
-(async function() {
-  await new Promise(r => setTimeout(r, 500));
-  var article = document.querySelector('article');
-  var text = article ? article.textContent : '';
-  var time = document.querySelector('time[datetime]');
-  var h1 = article ? article.querySelector('h1') : null;
-  // Parse likes/comments from "Like1.6KComment79Share" pattern
-  var idx = text.indexOf('Like');
-  var sub = idx >= 0 ? text.substring(idx + 4, idx + 30) : '';
-  var likesRaw = sub.split('Comment')[0] || '0';
-  var commentsRaw = sub.split('Comment')[1] ? sub.split('Comment')[1].split('Sha')[0] : '0';
-  function parseCount(s) {
-    s = s.trim();
-    if (s.includes('K')) return Math.round(parseFloat(s) * 1000);
-    if (s.includes('M')) return Math.round(parseFloat(s) * 1000000);
-    return parseInt(s.replace(/,/g, '')) || 0;
+var posts = document.querySelectorAll('a[href*="/p/"]');
+var data = [];
+for(var i=0; i<10 && i<posts.length; i++){
+  var a = posts[i];
+  var img = a.querySelector('img');
+  if(img && img.src){
+    var sc = a.href.split('/p/')[1].split('/')[0];
+    console.log('IMGURL:' + sc + ':' + img.src);
+    data.push({shortcode: sc, alt: img.alt || ''});
   }
-  // Find and download largest image
-  var imgs = document.querySelectorAll('img');
-  var largest = null;
-  var maxArea = 0;
-  imgs.forEach(function(img) {
-    if (img.naturalWidth > 200) {
-      var area = img.naturalWidth * img.naturalHeight;
-      if (area > maxArea) { maxArea = area; largest = img; }
-    }
-  });
-  var imgSize = 'none';
-  if (largest && maxArea > 50000) {
-    var canvas = document.createElement('canvas');
-    canvas.width = largest.naturalWidth;
-    canvas.height = largest.naturalHeight;
-    canvas.getContext('2d').drawImage(largest, 0, 0);
-    var a = document.createElement('a');
-    a.href = canvas.toDataURL('image/jpeg', 0.9);
-    a.download = '<username>_<shortcode>.jpg';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    imgSize = largest.naturalWidth + 'x' + largest.naturalHeight;
-  }
-  return JSON.stringify({
-    postedAt: time ? time.getAttribute('datetime') : null,
-    caption: h1 ? h1.textContent : null,
-    likesCount: parseCount(likesRaw),
-    commentsCount: parseInt(commentsRaw) || 0,
-    imageSize: imgSize
-  });
-})()
+}
+JSON.stringify(data)
 ```
 
-**Step 3: Save post and move image**
+This returns the alt text directly (which IS the artist's caption):
+```json
+[
+  {"shortcode": "DScuKtXDUbp", "alt": "Timeless • 久遠 #kyoto #photography #winter"},
+  {"shortcode": "DTAxm0RDYmT", "alt": "Lost in the atmospheric glow of old Japan #kyoto #photography"}
+]
+```
+
+**Step 2: Read URLs from console**
+
+Use `read_console_messages` with pattern `IMGURL` to retrieve the logged URLs:
+
+```
+read_console_messages(tabId, pattern="IMGURL", limit=20)
+```
+
+This returns entries like:
+```
+IMGURL:DTAXX54EZxZ:https://instagram.fsgn2-6.fna.fbcdn.net/v/t51.82787-15/...
+```
+
+**Step 3: Download all images via curl**
+
+For each URL extracted, download directly via curl:
+
+```bash
+# Create artist directory
+mkdir -p ./data/images/<username>
+
+# Download each image (can run in parallel)
+curl -s -o "./data/images/<username>/<shortcode>_0.jpg" "<image_url>"
+```
+
+Example:
+```bash
+curl -s -o "./data/images/sofia.portraits/DTAXX54EZxZ_0.jpg" "https://instagram.fsgn2-6.fna.fbcdn.net/v/t51.82787-15/610538973_..."
+```
+
+**Step 4: Save posts to database with caption**
+
+The alt text from Step 1 serves as the caption (Instagram's auto-generated description). For each post:
+
 ```bash
 bun run cli db save-post '{
   "shortcode": "<shortcode>",
   "artistUsername": "<username>",
-  "caption": "<caption>",
-  "likesCount": <number>,
-  "commentsCount": <number>,
   "postType": "image",
-  "postedAt": "<ISO datetime>",
-  "hashtags": []
+  "caption": "<alt text from grid>"
 }'
-
-bun run cli images move-download \
-  -f "<username>_<shortcode>.jpg" \
-  -a "<username>" \
-  -s "<shortcode>"
 ```
 
-**Step 4: Repeat for remaining shortcodes**
-- Navigate to next post URL directly
-- No need for ArrowRight key navigation
-- Wait 2 seconds between posts to avoid rate limiting
+Example with actual caption:
+```bash
+bun run cli db save-post '{
+  "shortcode": "DScuKtXDUbp",
+  "artistUsername": "da_frames",
+  "postType": "image",
+  "caption": "Timeless • 久遠 #kyoto #photography #winter"
+}'
+```
+
+> **Note:** The alt text IS the artist's actual caption when they provide one. Instagram only auto-generates a description (like "May be an image of...") when the artist leaves the caption empty. So this alt text is the primary source for captions.
+
+Then update the image path:
+```bash
+# The image is already in place, just update the DB
+bun run cli db update-post-image "<shortcode>" "./data/images/<username>/<shortcode>_0.jpg"
+```
+
+**Step 5: (Optional) Get full captions/likes for specific posts**
+
+If you need full caption or engagement data, navigate to the post page:
+
+```javascript
+// On post page https://www.instagram.com/p/<shortcode>/
+var article = document.querySelector('article');
+var h1 = article ? article.querySelector('h1') : null;
+var time = document.querySelector('time[datetime]');
+var text = article ? article.textContent : '';
+var idx = text.indexOf('Like');
+var sub = idx >= 0 ? text.substring(idx + 4, idx + 30) : '';
+var likesRaw = sub.split('Comment')[0] || '0';
+function parseCount(s) {
+  s = s.trim();
+  if (s.includes('K')) return Math.round(parseFloat(s) * 1000);
+  if (s.includes('M')) return Math.round(parseFloat(s) * 1000000);
+  return parseInt(s.replace(/,/g, '')) || 0;
+}
+JSON.stringify({
+  caption: h1 ? h1.textContent : null,
+  postedAt: time ? time.getAttribute('datetime') : null,
+  likesCount: parseCount(likesRaw)
+})
+```
+
+### Why This Method is Faster
+
+| Old Method | New Method |
+|------------|------------|
+| Navigate to each post (10 page loads) | Stay on profile page |
+| Wait 2s per post (20s total) | Single JS execution |
+| Canvas download + file move | Direct curl download |
+| ~30-40 seconds for 10 posts | ~5 seconds for 10 posts |
 
 ### 5. Complete Job
 ```bash
@@ -220,42 +343,111 @@ Database records:
 - `artists` - Emerging artist profiles (GalleryTalk.io prospects)
 - `posts` - Post metadata with `image_local_path` linking to downloaded image
 
-## Example Qualifying vs Non-Qualifying
+## Example AI Evaluations
 
-**QUALIFIES:**
+**QUALIFIED (Score: 85):**
 ```
 @marina.creates.art
 Followers: 8,432
 Bio: "Oil painter | NYC | Exploring light & shadow | Commissions open | Shop link in bio"
-Content: Original oil paintings, studio shots, work in progress
-→ Perfect GalleryTalk.io customer
+Captions: "Spent 3 weeks on this piece exploring urban solitude...", "New work available, DM for details"
+
+AI Response:
+{
+  "qualified": true,
+  "confidence": "high",
+  "score": 85,
+  "primary_reason": "Active oil painter with exhibition experience, sells commissions, engaged storytelling",
+  "red_flags": [],
+  "green_flags": ["Original artwork", "Sells commissions", "Process documentation", "Authentic voice"],
+  "recommended_action": "send_outreach",
+  "art_medium": "painting",
+  "personalization_hook": "Your urban solitude series and attention to light and shadow really stands out"
+}
 ```
 
-**SKIP:**
+**DISCARD - AI Art (Score: 10):**
+```
+@ai_dreamscapes
+Followers: 15,000
+Bio: "AI Art Creator | Making magic with Midjourney ✨ | Daily drops"
+Captions: "Prompt: 'ethereal goddess in moonlight, hyperrealistic, 8k' - what do you think?"
+
+AI Response:
+{
+  "qualified": false,
+  "confidence": "high",
+  "score": 10,
+  "primary_reason": "AI-generated art account, not target audience for human-created art platform",
+  "red_flags": ["AI-generated art", "Mentions AI tools in bio", "Prompt-based workflow"],
+  "green_flags": [],
+  "recommended_action": "discard",
+  "art_medium": "unknown",
+  "personalization_hook": ""
+}
+```
+
+**REVIEW MANUALLY (Score: 45):**
+```
+@artsy_vibes_2024
+Followers: 3,200
+Bio: "Artist 🎨 | NYC"
+Captions: "#art #painting #contemporary #artist #artistsoninstagram #instaart..."
+
+AI Response:
+{
+  "qualified": false,
+  "confidence": "low",
+  "score": 45,
+  "primary_reason": "Minimal information, unclear if genuine emerging artist or engagement farming",
+  "red_flags": ["Excessive hashtags", "No personal information", "Generic captions"],
+  "green_flags": ["Claims to be artist", "Mentions painting"],
+  "recommended_action": "review_manually",
+  "art_medium": "painting",
+  "personalization_hook": ""
+}
+```
+
+**DISCARD - Wrong Audience (Score: 25):**
+```
+@3d_character_pro
+Followers: 12,000
+Bio: "3D Character Artist | Game Dev | Blender enthusiast"
+Captions: "Finally finished this character model after 40 hours of sculpting..."
+
+AI Response:
+{
+  "qualified": false,
+  "confidence": "high",
+  "score": 25,
+  "primary_reason": "3D artist working in digital sculpting, not target audience for 2D/flat work gallery",
+  "red_flags": ["3D art focus", "Not flat work", "Game development context"],
+  "green_flags": ["Genuine artist", "Shows process"],
+  "recommended_action": "discard",
+  "art_medium": "unknown",
+  "personalization_hook": ""
+}
+```
+
+**DISCARD - Gallery Account (Score: 15):**
 ```
 @saatchiart
 Followers: 1,100,000
 Bio: "World's leading online art gallery"
 Content: Curated posts from various artists
-→ This is a marketplace/competitor, not a customer
-```
 
-**SKIP:**
-```
-@artsy_gallery_nyc
-Followers: 45,000
-Bio: "Contemporary Art Gallery | Exhibitions & Sales | NYC"
-Content: Gallery installations, artist features
-→ This is a physical gallery, not an emerging artist
-```
-
-**SKIP:**
-```
-@tiny_art_beginner
-Followers: 287
-Bio: "Just started painting!"
-Content: Hobby artwork
-→ Too small, not ready for platform yet
+AI Response:
+{
+  "qualified": false,
+  "confidence": "high",
+  "score": 15,
+  "primary_reason": "Art marketplace/gallery account, not an individual artist",
+  "red_flags": ["Gallery account", "Massive following", "Curated content not original work"],
+  "green_flags": [],
+  "recommended_action": "discard",
+  "art_medium": "unknown",
+  "personalization_hook": ""
+}
 ```
 
 ## Error Handling

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
-import { checkConnection, closeConnection } from "./db";
+import { checkConnection, closeConnection, updatePostImagePath } from "./db";
 import { handleSaveArtist } from "./commands/save-artist";
 import { handleSavePost } from "./commands/save-post";
 import {
@@ -58,6 +58,17 @@ dbCmd
   .argument("<json>", "Post data as JSON string")
   .action((json) => {
     handleSavePost(json);
+    closeConnection();
+  });
+
+dbCmd
+  .command("update-post-image")
+  .description("Update the local image path for a post")
+  .argument("<shortcode>", "Post shortcode")
+  .argument("<path>", "Local image path")
+  .action((shortcode, path) => {
+    updatePostImagePath(shortcode, path);
+    console.log(`Updated image path for ${shortcode}: ${path}`);
     closeConnection();
   });
 
