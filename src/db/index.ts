@@ -1,4 +1,4 @@
-import { eq, desc, isNull } from "drizzle-orm";
+import { eq, desc, isNull, sql, and, or, gte, lte } from "drizzle-orm";
 import { db } from "./client";
 import {
   artists,
@@ -47,6 +47,54 @@ export function getAllArtists() {
   return db.query.artists.findMany({
     orderBy: desc(artists.scrapedAt),
   }).sync();
+}
+
+export function listArtists(opts: {
+  limit?: number;
+  offset?: number;
+  minFollowers?: number;
+  maxFollowers?: number;
+  search?: string;
+} = {}) {
+  const { limit = 60, offset = 0, minFollowers, maxFollowers, search } = opts;
+  const conditions = [];
+  if (typeof minFollowers === "number") conditions.push(gte(artists.followersCount, minFollowers));
+  if (typeof maxFollowers === "number") conditions.push(lte(artists.followersCount, maxFollowers));
+  if (search && search.length > 0) {
+    const like = `%${search.toLowerCase()}%`;
+    conditions.push(
+      or(
+        sql`lower(${artists.username}) like ${like}`,
+        sql`lower(coalesce(${artists.fullName}, '')) like ${like}`,
+      )!
+    );
+  }
+  const where = conditions.length ? and(...conditions) : undefined;
+  const rows = db.query.artists.findMany({
+    where,
+    orderBy: desc(artists.scrapedAt),
+    limit,
+    offset,
+  }).sync();
+  const totalRow = db
+    .select({ count: sql<number>`count(*)` })
+    .from(artists)
+    .where(where ?? sql`1=1`)
+    .get();
+  return { rows, total: totalRow?.count ?? 0 };
+}
+
+export function getArtistDetail(username: string) {
+  const artist = db.query.artists.findFirst({
+    where: eq(artists.username, username),
+    with: {
+      posts: {
+        orderBy: desc(posts.postedAt),
+        with: { images: true },
+      },
+    },
+  }).sync();
+  return artist ?? null;
 }
 
 // ============ POSTS ============
@@ -156,6 +204,54 @@ export function getAllHashtags() {
   }).sync();
 }
 
+export function listTags() {
+  const rows = db
+    .select({
+      id: hashtags.id,
+      name: hashtags.name,
+      postsCount: hashtags.postsCount,
+      lastScrapedAt: hashtags.lastScrapedAt,
+      isTracked: hashtags.isTracked,
+      priority: hashtags.priority,
+      createdAt: hashtags.createdAt,
+      linkedPosts: sql<number>`(select count(*) from post_hashtags ph where ph.hashtag_id = ${hashtags.id})`,
+    })
+    .from(hashtags)
+    .orderBy(desc(hashtags.isTracked), hashtags.priority, hashtags.name)
+    .all();
+  return rows;
+}
+
+export function listTrackedHashtags() {
+  return db.query.hashtags.findMany({
+    where: eq(hashtags.isTracked, true),
+    orderBy: [desc(hashtags.priority), hashtags.name],
+  }).sync();
+}
+
+export function setTagTracked(name: string, isTracked: boolean, priority?: number) {
+  const existing = db.query.hashtags.findFirst({
+    where: eq(hashtags.name, name),
+  }).sync();
+  if (existing) {
+    db.update(hashtags)
+      .set({ isTracked, ...(priority !== undefined ? { priority } : {}) })
+      .where(eq(hashtags.id, existing.id))
+      .run();
+    return { ...existing, isTracked, priority: priority ?? existing.priority };
+  }
+  const inserted = db
+    .insert(hashtags)
+    .values({ name, isTracked, priority: priority ?? 0 })
+    .returning()
+    .get();
+  return inserted;
+}
+
+export function deleteTag(name: string) {
+  db.delete(hashtags).where(eq(hashtags.name, name)).run();
+}
+
 // ============ POST-HASHTAGS ============
 
 export function linkPostToHashtag(postId: number, hashtagId: number) {
@@ -243,6 +339,36 @@ export function getRecentJobs(limit = 20) {
 export function getRunningJobs() {
   return db.query.scrapeJobs.findMany({
     where: eq(scrapeJobs.status, "running"),
+  }).sync();
+}
+
+export function claimNextPendingJob(): { id: number; jobType: "hashtag" | "artist"; target: string } | null {
+  const next = db.query.scrapeJobs.findFirst({
+    where: eq(scrapeJobs.status, "pending"),
+    orderBy: scrapeJobs.createdAt,
+  }).sync();
+  if (!next) return null;
+  db.update(scrapeJobs)
+    .set({ status: "running", startedAt: new Date() })
+    .where(eq(scrapeJobs.id, next.id))
+    .run();
+  return { id: next.id, jobType: next.jobType as "hashtag" | "artist", target: next.target };
+}
+
+export function countPendingJobs(): number {
+  const r = db.select({ c: sql<number>`count(*)` }).from(scrapeJobs).where(eq(scrapeJobs.status, "pending")).get();
+  return r?.c ?? 0;
+}
+
+export function listJobs(opts: { limit?: number; status?: string } = {}) {
+  const { limit = 50, status } = opts;
+  const where = status
+    ? eq(scrapeJobs.status, status as "pending" | "running" | "completed" | "failed")
+    : undefined;
+  return db.query.scrapeJobs.findMany({
+    where,
+    orderBy: desc(scrapeJobs.createdAt),
+    limit,
   }).sync();
 }
 

@@ -17,6 +17,8 @@ import {
   handleUpdateProgress,
   handleListJobs,
   handleGetJob,
+  handleNextJob,
+  handlePendingCount,
 } from "./commands/job-status";
 
 const program = new Command();
@@ -202,6 +204,22 @@ jobCmd
   .argument("<id>", "Job ID")
   .action((id) => {
     handleGetJob(id);
+    closeConnection();
+  });
+
+jobCmd
+  .command("next")
+  .description("Claim the next pending job (sets status=running) and print as JSON")
+  .action(() => {
+    handleNextJob();
+    closeConnection();
+  });
+
+jobCmd
+  .command("pending")
+  .description("Print count of pending jobs as JSON")
+  .action(() => {
+    handlePendingCount();
     closeConnection();
   });
 

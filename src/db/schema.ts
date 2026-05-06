@@ -78,9 +78,14 @@ export const hashtags = sqliteTable(
     name: text("name").notNull().unique(),
     postsCount: integer("posts_count"),
     lastScrapedAt: integer("last_scraped_at", { mode: "timestamp" }),
+    isTracked: integer("is_tracked", { mode: "boolean" }).default(false),
+    priority: integer("priority").default(0),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
   },
-  (table) => [index("idx_hashtags_name").on(table.name)]
+  (table) => [
+    index("idx_hashtags_name").on(table.name),
+    index("idx_hashtags_is_tracked").on(table.isTracked),
+  ]
 );
 
 // Junction table for posts and hashtags (many-to-many)

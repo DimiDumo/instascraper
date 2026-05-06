@@ -7,6 +7,8 @@ import {
   getJob,
   getRecentJobs,
   getRunningJobs,
+  claimNextPendingJob,
+  countPendingJobs,
   type ScrapeJob,
 } from "../db";
 
@@ -133,4 +135,18 @@ export function handleGetJob(jobId: string) {
   if (job) {
     console.log(JSON.stringify(job, null, 2));
   }
+}
+
+export function handleNextJob() {
+  const next = claimNextPendingJob();
+  if (!next) {
+    console.log(JSON.stringify({ done: true, pending: 0 }));
+    return;
+  }
+  const remaining = countPendingJobs();
+  console.log(JSON.stringify({ done: false, job: next, remaining }));
+}
+
+export function handlePendingCount() {
+  console.log(JSON.stringify({ pending: countPendingJobs() }));
 }
