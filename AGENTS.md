@@ -49,7 +49,7 @@ Local laptop (only when scraping):
   CLI ── S3 ─────> R2 bucket  Direct image uploads (skips Worker hop)
 ```
 
-The web app polls `http://localhost:3737/api/health` to detect whether the local scraper is reachable. When reachable → "local-agent" mode, scrape/generation buttons enabled. When unreachable → "cloud mode" banner, those buttons disabled (data is still viewable).
+The web app polls `http://localhost:3737/api/health` to detect whether the local scraper is reachable. A small colored-dot indicator in the sidebar footer shows the state: green "scraper connected" (local-agent reachable — scrape/generation buttons enabled) or amber "cloud mode" (read-only). Cloud data calls use relative `/api/*` (same-origin via the Worker route on `reo.gallerytalk.io`); orchestration calls hit `http://localhost:3737/api/*` directly.
 
 ## Quick Start
 
@@ -61,7 +61,9 @@ bun install
 
 # Populate .env (root) — see .env.example for required keys:
 #   CLOUD_API_URL, CF_ACCESS_CLIENT_ID/SECRET, R2_ACCOUNT_ID/ACCESS_KEY/SECRET/BUCKET
-# Populate web/.env (VITE_CLOUD_API_URL, VITE_LOCAL_API_URL).
+# Populate web/.env (optional in prod since cloud calls are relative; in dev set
+# VITE_CLOUD_API_URL so Vite proxies /api → Worker, and VITE_LOCAL_API_URL for
+# the local-agent health probe).
 
 # Run local orchestration server + web dev server
 bun run dev
