@@ -8,6 +8,8 @@ import { postsRoute } from "./routes/posts";
 import { tagsRoute } from "./routes/tags";
 import { jobsRoute } from "./routes/jobs";
 import { logsRoute } from "./routes/logs";
+import { promptsRoute } from "./routes/prompts";
+import { generationsRoute } from "./routes/generations";
 import { subscribe } from "./services/events";
 
 const app = new Hono();
@@ -26,6 +28,8 @@ app.route("/api/posts", postsRoute);
 app.route("/api/tags", tagsRoute);
 app.route("/api/jobs", jobsRoute);
 app.route("/api/logs", logsRoute);
+app.route("/api/prompts", promptsRoute);
+app.route("/api/generations", generationsRoute);
 
 app.get("/api/health", (c) => c.json({ ok: true }));
 

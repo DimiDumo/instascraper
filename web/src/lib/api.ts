@@ -67,6 +67,32 @@ export interface QueueState {
   pending: Array<{ jobId: number; jobType: string; target: string }>;
 }
 
+export type PromptKind = "generate" | "cleanup";
+
+export interface Prompt {
+  id: number;
+  name: string;
+  body: string;
+  kind: PromptKind;
+  previousBody: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+export interface Generation {
+  id: number;
+  artistId: number;
+  promptId: number | null;
+  promptName: string | null;
+  output: string;
+  originalOutput: string;
+  model: string | null;
+  status: "running" | "done" | "failed";
+  errorMessage: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -131,6 +157,40 @@ export const api = {
     jsonFetch<{ enqueued: Job[] }>(`/api/jobs/run-tracked`, { method: "POST" }),
   cancelJob: (jobId: number) =>
     jsonFetch<{ ok: true; killed: boolean }>(`/api/jobs/${jobId}/cancel`, { method: "POST" }),
+  listPrompts: () => jsonFetch<{ rows: Prompt[] }>(`/api/prompts`),
+  createPrompt: (name: string, body: string, kind: PromptKind = "generate") =>
+    jsonFetch<Prompt>(`/api/prompts`, {
+      method: "POST",
+      body: JSON.stringify({ name, body, kind }),
+    }),
+  updatePrompt: (id: number, patch: { name?: string; body?: string; kind?: PromptKind }) =>
+    jsonFetch<Prompt>(`/api/prompts/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+  deletePrompt: (id: number) =>
+    jsonFetch<{ ok: true }>(`/api/prompts/${id}`, { method: "DELETE" }),
+  refinePrompt: (id: number, generationId: number, feedback: string) =>
+    jsonFetch<{ proposedBody: string }>(`/api/prompts/${id}/refine`, {
+      method: "POST",
+      body: JSON.stringify({ generationId, feedback }),
+    }),
+  undoPrompt: (id: number) =>
+    jsonFetch<Prompt>(`/api/prompts/${id}/undo`, { method: "POST" }),
+  listGenerations: (username: string) =>
+    jsonFetch<{ rows: Generation[] }>(`/api/generations/by-artist/${encodeURIComponent(username)}`),
+  generate: (username: string, promptId: number) =>
+    jsonFetch<Generation>(`/api/generations`, {
+      method: "POST",
+      body: JSON.stringify({ username, promptId }),
+    }),
+  updateGeneration: (id: number, output: string) =>
+    jsonFetch<Generation>(`/api/generations/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ output }),
+    }),
+  deleteGeneration: (id: number) =>
+    jsonFetch<{ ok: true }>(`/api/generations/${id}`, { method: "DELETE" }),
 };
 
 /** Convert local image path on disk (data/images/...) to /images/... URL. */

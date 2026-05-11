@@ -7,11 +7,15 @@ import {
   hashtags,
   postHashtags,
   scrapeJobs,
+  prompts,
+  generations,
   type NewArtist,
   type NewPost,
   type NewImage,
   type NewHashtag,
   type NewScrapeJob,
+  type NewPrompt,
+  type NewGeneration,
 } from "./schema";
 
 // ============ ARTISTS ============
@@ -370,6 +374,100 @@ export function listJobs(opts: { limit?: number; status?: string } = {}) {
     orderBy: desc(scrapeJobs.createdAt),
     limit,
   }).sync();
+}
+
+// ============ PROMPTS ============
+
+export function listPrompts(opts: { kind?: "generate" | "cleanup" } = {}) {
+  return db.query.prompts.findMany({
+    where: opts.kind ? eq(prompts.kind, opts.kind) : undefined,
+    orderBy: desc(prompts.updatedAt),
+  }).sync();
+}
+
+// Latest-updated cleanup prompt — auto-chained after every generation.
+export function getActiveCleanupPrompt() {
+  return db.query.prompts.findFirst({
+    where: eq(prompts.kind, "cleanup"),
+    orderBy: desc(prompts.updatedAt),
+  }).sync();
+}
+
+export function getPrompt(id: number) {
+  return db.query.prompts.findFirst({
+    where: eq(prompts.id, id),
+  }).sync();
+}
+
+export function createPrompt(data: NewPrompt) {
+  return db.insert(prompts).values(data).returning().get();
+}
+
+export function updatePrompt(id: number, data: Partial<NewPrompt>) {
+  const current = db.query.prompts.findFirst({ where: eq(prompts.id, id) }).sync();
+  if (!current) return null;
+  const patch: Partial<NewPrompt> = { ...data, updatedAt: new Date() };
+  // Snapshot the existing body into previousBody when body actually changes — enables single-step undo
+  if (typeof data.body === "string" && data.body !== current.body) {
+    patch.previousBody = current.body;
+  }
+  db.update(prompts).set(patch).where(eq(prompts.id, id)).run();
+  return db.query.prompts.findFirst({ where: eq(prompts.id, id) }).sync();
+}
+
+export function undoPrompt(id: number) {
+  const current = db.query.prompts.findFirst({ where: eq(prompts.id, id) }).sync();
+  if (!current || !current.previousBody) return null;
+  db.update(prompts)
+    .set({ body: current.previousBody, previousBody: null, updatedAt: new Date() })
+    .where(eq(prompts.id, id))
+    .run();
+  return db.query.prompts.findFirst({ where: eq(prompts.id, id) }).sync();
+}
+
+export function deletePrompt(id: number) {
+  // Generations keep promptName snapshot; null out FK so we don't violate constraint
+  db.update(generations).set({ promptId: null }).where(eq(generations.promptId, id)).run();
+  db.delete(prompts).where(eq(prompts.id, id)).run();
+}
+
+// ============ GENERATIONS ============
+
+export function listGenerationsByArtist(artistId: number) {
+  return db.query.generations.findMany({
+    where: eq(generations.artistId, artistId),
+    orderBy: desc(generations.createdAt),
+  }).sync();
+}
+
+export function getGeneration(id: number) {
+  return db.query.generations.findFirst({
+    where: eq(generations.id, id),
+  }).sync();
+}
+
+export function createGeneration(data: NewGeneration) {
+  return db.insert(generations).values(data).returning().get();
+}
+
+export function updateGeneration(id: number, patch: Partial<NewGeneration>) {
+  db.update(generations)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(eq(generations.id, id))
+    .run();
+  return db.query.generations.findFirst({ where: eq(generations.id, id) }).sync();
+}
+
+export function editGenerationOutput(id: number, output: string) {
+  db.update(generations)
+    .set({ output, updatedAt: new Date() })
+    .where(eq(generations.id, id))
+    .run();
+  return db.query.generations.findFirst({ where: eq(generations.id, id) }).sync();
+}
+
+export function deleteGeneration(id: number) {
+  db.delete(generations).where(eq(generations.id, id)).run();
 }
 
 // Re-export types and client

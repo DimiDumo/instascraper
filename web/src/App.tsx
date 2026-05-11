@@ -3,6 +3,7 @@ import { Artists } from "./pages/Artists";
 import { ArtistDetail } from "./pages/ArtistDetail";
 import { Tags } from "./pages/Tags";
 import { Jobs } from "./pages/Jobs";
+import { Prompts } from "./pages/Prompts";
 import { useJobEvents } from "./lib/sse";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "./lib/api";
@@ -30,6 +31,7 @@ export function App() {
         </h1>
         <NavItem to="/">Artists</NavItem>
         <NavItem to="/tags">Hashtags</NavItem>
+        <NavItem to="/prompts">Prompts</NavItem>
         <NavItem to="/jobs">
           Jobs <NavBadge />
         </NavItem>
@@ -43,6 +45,7 @@ export function App() {
           <Route path="/" element={<Artists />} />
           <Route path="/artists/:username" element={<ArtistDetail />} />
           <Route path="/tags" element={<Tags />} />
+          <Route path="/prompts" element={<Prompts />} />
           <Route path="/jobs" element={<Jobs />} />
         </Routes>
       </main>

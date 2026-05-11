@@ -126,9 +126,51 @@ export const scrapeJobs = sqliteTable(
   ]
 );
 
+// Prompts table - reusable instruction templates (e.g. "write a warm IG DM")
+// kind=generate: produce DM from artist context
+// kind=cleanup: post-process generated DM (e.g. strip em-dashes). Latest updated cleanup prompt auto-runs after every generation.
+export const prompts = sqliteTable(
+  "prompts",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    name: text("name").notNull(),
+    body: text("body").notNull(),
+    kind: text("kind", { enum: ["generate", "cleanup"] }).notNull().default("generate"),
+    previousBody: text("previous_body"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  },
+  (table) => [index("idx_prompts_name").on(table.name), index("idx_prompts_kind").on(table.kind)]
+);
+
+// Generations - one per Generate click; promptId is nullable so deleting a prompt keeps history
+export const generations = sqliteTable(
+  "generations",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    artistId: integer("artist_id")
+      .notNull()
+      .references(() => artists.id),
+    promptId: integer("prompt_id").references(() => prompts.id),
+    promptName: text("prompt_name"),
+    output: text("output").notNull().default(""),
+    originalOutput: text("original_output").notNull().default(""),
+    model: text("model"),
+    status: text("status", { enum: ["running", "done", "failed"] }).default("done"),
+    errorMessage: text("error_message"),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  },
+  (table) => [
+    index("idx_generations_artist").on(table.artistId),
+    index("idx_generations_prompt").on(table.promptId),
+  ]
+);
+
 // Relations
 export const artistsRelations = relations(artists, ({ many }) => ({
   posts: many(posts),
+  generations: many(generations),
 }));
 
 export const postsRelations = relations(posts, ({ one, many }) => ({
@@ -162,6 +204,21 @@ export const postHashtagsRelations = relations(postHashtags, ({ one }) => ({
   }),
 }));
 
+export const promptsRelations = relations(prompts, ({ many }) => ({
+  generations: many(generations),
+}));
+
+export const generationsRelations = relations(generations, ({ one }) => ({
+  artist: one(artists, {
+    fields: [generations.artistId],
+    references: [artists.id],
+  }),
+  prompt: one(prompts, {
+    fields: [generations.promptId],
+    references: [prompts.id],
+  }),
+}));
+
 // Type exports
 export type Artist = typeof artists.$inferSelect;
 export type NewArtist = typeof artists.$inferInsert;
@@ -173,3 +230,7 @@ export type Hashtag = typeof hashtags.$inferSelect;
 export type NewHashtag = typeof hashtags.$inferInsert;
 export type ScrapeJob = typeof scrapeJobs.$inferSelect;
 export type NewScrapeJob = typeof scrapeJobs.$inferInsert;
+export type Prompt = typeof prompts.$inferSelect;
+export type NewPrompt = typeof prompts.$inferInsert;
+export type Generation = typeof generations.$inferSelect;
+export type NewGeneration = typeof generations.$inferInsert;
