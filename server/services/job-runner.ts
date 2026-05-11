@@ -1,5 +1,5 @@
 import { runAgent } from "../agents";
-import { startJob, completeJob, failJob, getJob } from "../../src/db";
+import * as cloud from "../../src/cloud/client";
 import { emit } from "./events";
 import { appendLog } from "./log-buffer";
 
@@ -14,10 +14,11 @@ function ts() {
 
 export async function runJob(input: RunJobInput): Promise<void> {
   const { jobId, prompt } = input;
-  startJob(jobId);
+  await cloud.jobs.start(jobId);
   const cmd = process.env.AGENT_CMD?.trim() || "claude";
   const argStr =
-    process.env.AGENT_ARGS ?? "-p --chrome --dangerously-skip-permissions --output-format stream-json --verbose";
+    process.env.AGENT_ARGS ??
+    "-p --chrome --dangerously-skip-permissions --output-format stream-json --verbose";
   const banner = `[job ${jobId}] starting: ${cmd} ${argStr} "${prompt.slice(0, 120)}…"`;
   console.log(banner);
   appendLog(jobId, banner, "system");
@@ -39,34 +40,33 @@ export async function runJob(input: RunJobInput): Promise<void> {
     });
 
     if (result.cancelled) {
-      failJob(jobId, "cancelled by user");
+      await cloud.jobs.fail(jobId, "cancelled by user");
       const msg = `[job ${jobId}] cancelled`;
       console.warn(msg);
       appendLog(jobId, msg, "system");
     } else if (result.exitCode === 0) {
-      const fresh = getJob(jobId);
+      const fresh = await cloud.jobs.get(jobId).catch(() => null);
       // Skill may have already marked the job failed via `bun run cli job fail`.
-      // Respect that — don't override to completed.
       if (fresh?.status === "failed") {
         const msg = `[job ${jobId}] FAILED (skill reported): ${fresh.errorMessage ?? "(no message)"}`;
         console.error(msg);
         appendLog(jobId, msg, "system");
       } else {
         const items = fresh?.itemsScraped ?? 0;
-        completeJob(jobId, items);
+        await cloud.jobs.complete(jobId, items);
         const done = `[job ${jobId}] done — ${items} items scraped`;
         console.log(done);
         appendLog(jobId, done, "system");
       }
     } else {
       const fail = `[job ${jobId}] FAILED (exit ${result.exitCode})`;
-      failJob(jobId, fail);
+      await cloud.jobs.fail(jobId, fail);
       console.error(fail);
       appendLog(jobId, fail, "system");
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    failJob(jobId, msg);
+    await cloud.jobs.fail(jobId, msg);
     console.error(`[job ${jobId}] threw:`, msg);
     appendLog(jobId, `threw: ${msg}`, "system");
   } finally {

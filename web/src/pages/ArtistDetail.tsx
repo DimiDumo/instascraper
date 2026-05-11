@@ -4,10 +4,13 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, imageUrl, relTime } from "../lib/api";
 import { ImageGrid } from "../components/ImageGrid";
 import { GenerationCard } from "../components/GenerationCard";
+import { useCurrentMode } from "../lib/mode";
 
 export function ArtistDetail() {
   const { username = "" } = useParams();
   const qc = useQueryClient();
+  const { mode } = useCurrentMode();
+  const localOnly = mode !== "local-agent";
   const { data: artist, isLoading } = useQuery({
     queryKey: ["artists", username],
     queryFn: () => api.getArtist(username),
@@ -51,7 +54,7 @@ export function ArtistDetail() {
   if (isLoading) return <p className="text-muted">Loading…</p>;
   if (!artist) return <p className="text-muted">Artist not found.</p>;
 
-  const pic = imageUrl(artist.profilePicLocalPath) ?? artist.profilePicUrl ?? undefined;
+  const pic = imageUrl(artist.profilePicKey) ?? artist.profilePicUrl ?? undefined;
 
   return (
     <div className="space-y-6">
@@ -82,7 +85,8 @@ export function ArtistDetail() {
             </a>
             <button
               onClick={() => rescrape.mutate()}
-              disabled={rescrape.isPending}
+              disabled={rescrape.isPending || localOnly}
+              title={localOnly ? "Connect local scraper to rescrape" : undefined}
               className="text-xs px-3 py-1.5 rounded bg-accent/80 text-black hover:bg-accent disabled:opacity-50"
             >
               {rescrape.isPending ? "queued…" : "rescrape"}
@@ -119,7 +123,8 @@ export function ArtistDetail() {
             </select>
             <button
               onClick={() => generate.mutate()}
-              disabled={!activePromptId || generate.isPending}
+              disabled={!activePromptId || generate.isPending || localOnly}
+              title={localOnly ? "Connect local scraper to generate" : undefined}
               className="text-sm px-4 py-1.5 rounded bg-accent text-black font-medium hover:bg-accent/90 disabled:opacity-40"
             >
               {generate.isPending ? "queueing…" : "Generate"}

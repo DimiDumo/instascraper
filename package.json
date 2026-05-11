@@ -8,32 +8,27 @@
   },
   "scripts": {
     "cli": "bun run src/index.ts",
-    "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio",
-    "db:check": "bun run src/index.ts db check",
     "dev:server": "bun run --watch server/index.ts",
     "dev:web": "cd web && bun run dev",
     "dev": "concurrently -n server,web -c blue,magenta \"bun run dev:server\" \"bun run dev:web\"",
     "build:web": "cd web && bun run build",
     "build": "bun run build:web",
-    "start": "NODE_ENV=production bun run server/index.ts"
+    "start": "NODE_ENV=production bun run server/index.ts",
+    "cloud:dev": "cd cloud && bun run dev",
+    "cloud:deploy": "cd cloud && bun run deploy",
+    "cloud:migrations:apply": "cd cloud && bun run db:migrations:apply:remote"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.13",
     "@types/bun": "latest",
     "@types/node": "^25.0.3",
-    "better-sqlite3": "^12.5.0",
-    "concurrently": "^9.1.0",
-    "drizzle-kit": "^0.31.8"
+    "concurrently": "^9.1.0"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
+    "aws4fetch": "^1.0.20",
     "commander": "^14.0.2",
-    "drizzle-orm": "^0.45.1",
     "hono": "^4.6.14"
   }
 }

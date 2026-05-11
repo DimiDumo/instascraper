@@ -3,31 +3,48 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, relTime } from "../lib/api";
 import { JobBadge } from "../components/JobBadge";
 import { JobLogs } from "../components/JobLogs";
+import { useCurrentMode } from "../lib/mode";
 
 export function Jobs() {
   const qc = useQueryClient();
   const [openLogs, setOpenLogs] = useState<number | null>(null);
+  const { mode } = useCurrentMode();
+  const localOnly = mode !== "local-agent";
+
+  // Job history lives in cloud D1.
   const { data, isLoading } = useQuery({
     queryKey: ["jobs"],
     queryFn: api.listJobs,
     refetchInterval: 5_000,
   });
-  const cancel = useMutation({
-    mutationFn: (jobId: number) => api.cancelJob(jobId),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["jobs"] }),
+
+  // Live queue + currently-running job live in local-agent memory; skip when unreachable.
+  const { data: queue } = useQuery({
+    queryKey: ["queue"],
+    queryFn: api.getQueueState,
+    refetchInterval: 5_000,
+    enabled: !localOnly,
   });
 
-  const pendingCount = data?.queue.pending.length ?? 0;
+  const cancel = useMutation({
+    mutationFn: (jobId: number) => api.cancelJob(jobId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      qc.invalidateQueries({ queryKey: ["queue"] });
+    },
+  });
+
+  const pendingCount = queue?.pending.length ?? 0;
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Jobs</h1>
         <p className="text-sm text-muted">
-          UI queues jobs; you drain them by running <code className="bg-surface-2 px-1 rounded">/scrape-next</code> in your Claude Code session.
+          UI queues jobs; drain them by running <code className="bg-surface-2 px-1 rounded">/scrape-next</code> in your Claude Code session.
         </p>
       </div>
 
-      {pendingCount > 0 && (
+      {!localOnly && pendingCount > 0 && (
         <div className="bg-emerald-100/70 dark:bg-emerald-950/40 border border-emerald-700/40 rounded p-3 text-sm">
           <p className="font-medium text-emerald-800 dark:text-emerald-200">
             {pendingCount} job{pendingCount === 1 ? "" : "s"} waiting.
@@ -39,55 +56,59 @@ export function Jobs() {
         </div>
       )}
 
-      <section>
-        <h2 className="text-sm uppercase tracking-wide text-muted mb-2">Now</h2>
-        {data?.queue.running ? (
-          <div className="bg-panel border border-amber-500/40 rounded p-3 text-sm space-y-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-amber-700 dark:text-amber-300 mr-2">running</span>
-                <span className="font-mono">
-                  {data.queue.running.jobType === "hashtag" ? "#" : "@"}
-                  {data.queue.running.target}
-                </span>
-                <span className="text-muted ml-2">job #{data.queue.running.jobId}</span>
+      {!localOnly && (
+        <>
+          <section>
+            <h2 className="text-sm uppercase tracking-wide text-muted mb-2">Now</h2>
+            {queue?.running ? (
+              <div className="bg-panel border border-amber-500/40 rounded p-3 text-sm space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-amber-700 dark:text-amber-300 mr-2">running</span>
+                    <span className="font-mono">
+                      {queue.running.jobType === "hashtag" ? "#" : "@"}
+                      {queue.running.target}
+                    </span>
+                    <span className="text-muted ml-2">job #{queue.running.jobId}</span>
+                  </div>
+                  <button
+                    onClick={() => cancel.mutate(queue.running!.jobId)}
+                    disabled={cancel.isPending}
+                    className="text-xs px-2 py-1 rounded bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-900/40 dark:hover:bg-rose-900/60 dark:text-rose-200 disabled:opacity-50"
+                  >
+                    {cancel.isPending ? "cancelling…" : "cancel"}
+                  </button>
+                </div>
+                <JobLogs jobId={queue.running.jobId} live />
               </div>
-              <button
-                onClick={() => cancel.mutate(data.queue.running!.jobId)}
-                disabled={cancel.isPending}
-                className="text-xs px-2 py-1 rounded bg-rose-100 text-rose-700 hover:bg-rose-200 dark:bg-rose-900/40 dark:hover:bg-rose-900/60 dark:text-rose-200 disabled:opacity-50"
-              >
-                {cancel.isPending ? "cancelling…" : "cancel"}
-              </button>
-            </div>
-            <JobLogs jobId={data.queue.running.jobId} live />
-          </div>
-        ) : (
-          <p className="text-muted text-sm">idle</p>
-        )}
-      </section>
+            ) : (
+              <p className="text-muted text-sm">idle</p>
+            )}
+          </section>
 
-      <section>
-        <h2 className="text-sm uppercase tracking-wide text-muted mb-2">
-          Queued ({data?.queue.pending.length ?? 0})
-        </h2>
-        {(data?.queue.pending.length ?? 0) === 0 ? (
-          <p className="text-muted text-sm">empty</p>
-        ) : (
-          <ul className="space-y-1">
-            {data!.queue.pending.map((q, i) => (
-              <li key={q.jobId} className="text-sm bg-panel border border-border rounded px-3 py-2">
-                <span className="text-muted mr-2">#{i + 1}</span>
-                <span className="font-mono">
-                  {q.jobType === "hashtag" ? "#" : "@"}
-                  {q.target}
-                </span>
-                <span className="text-muted ml-2">job #{q.jobId}</span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+          <section>
+            <h2 className="text-sm uppercase tracking-wide text-muted mb-2">
+              Queued ({queue?.pending.length ?? 0})
+            </h2>
+            {(queue?.pending.length ?? 0) === 0 ? (
+              <p className="text-muted text-sm">empty</p>
+            ) : (
+              <ul className="space-y-1">
+                {queue!.pending.map((q, i) => (
+                  <li key={q.jobId} className="text-sm bg-panel border border-border rounded px-3 py-2">
+                    <span className="text-muted mr-2">#{i + 1}</span>
+                    <span className="font-mono">
+                      {q.jobType === "hashtag" ? "#" : "@"}
+                      {q.target}
+                    </span>
+                    <span className="text-muted ml-2">job #{q.jobId}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </>
+      )}
 
       <section>
         <h2 className="text-sm uppercase tracking-wide text-muted mb-2">Recent</h2>
@@ -129,15 +150,17 @@ export function Jobs() {
                       <td className="px-3 py-2 text-muted">{relTime(j.startedAt)}</td>
                       <td className="px-3 py-2 text-muted">
                         {relTime(j.completedAt)}
-                        <button
-                          onClick={() => setOpenLogs(openLogs === j.id ? null : j.id)}
-                          className="ml-2 text-[10px] underline text-muted hover:text-fg"
-                        >
-                          {openLogs === j.id ? "hide logs" : "logs"}
-                        </button>
+                        {!localOnly && (
+                          <button
+                            onClick={() => setOpenLogs(openLogs === j.id ? null : j.id)}
+                            className="ml-2 text-[10px] underline text-muted hover:text-fg"
+                          >
+                            {openLogs === j.id ? "hide logs" : "logs"}
+                          </button>
+                        )}
                       </td>
                     </tr>
-                    {openLogs === j.id && (
+                    {!localOnly && openLogs === j.id && (
                       <tr>
                         <td colSpan={7} className="px-3 py-2 bg-surface-2/60 dark:bg-black/40">
                           <JobLogs jobId={j.id} />

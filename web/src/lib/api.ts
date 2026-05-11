@@ -1,3 +1,17 @@
+// Cloud calls go to a relative `/api/*` path:
+//   - In dev (vite at localhost:5173), vite.config.ts proxies it to the cloud
+//     Worker and injects the CF Access Service Token headers so preflight
+//     succeeds without a CF Access cookie.
+//   - In prod, the web app is served from reo.gallerytalk.io and the Worker is
+//     routed to /api/* on the same host — same-origin, no CORS, browser cookie
+//     auth.
+//
+// Local orchestration calls (scrape kick-off, generations POST, refine, queue,
+// logs, SSE) always go to the absolute localhost server when reachable.
+
+const CLOUD_API = ""; // relative
+const LOCAL_API = (import.meta.env.VITE_LOCAL_API_URL as string | undefined)?.replace(/\/$/, "") ?? "http://localhost:3737";
+
 export interface Artist {
   id: number;
   username: string;
@@ -6,7 +20,7 @@ export interface Artist {
   followersCount: number | null;
   followingCount: number | null;
   postsCount: number | null;
-  profilePicLocalPath: string | null;
+  profilePicKey: string | null;
   profilePicUrl: string | null;
   isVerified: boolean | null;
   scrapedAt: string | null;
@@ -17,7 +31,7 @@ export interface Artist {
 export interface Image {
   id: number;
   url: string;
-  localPath: string | null;
+  r2Key: string | null;
   width: number | null;
   height: number | null;
   downloadedAt: string | null;
@@ -30,7 +44,7 @@ export interface Post {
   likesCount: number | null;
   commentsCount: number | null;
   postType: "image" | "video" | "carousel" | null;
-  imageLocalPath: string | null;
+  imageKey: string | null;
   postedAt: string | null;
   scrapedAt: string | null;
   images: Image[];
@@ -93,8 +107,21 @@ export interface Generation {
   updatedAt: string | null;
 }
 
-async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, {
+async function cloudFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${CLOUD_API}${path}`, {
+    ...init,
+    credentials: "include",
+    headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${res.statusText}: ${text}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+async function localFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${LOCAL_API}${path}`, {
     ...init,
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
   });
@@ -106,6 +133,7 @@ async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // ── DATA (cloud Worker) ────────────────────────────────────────────────────
   listArtists: (
     params: {
       limit?: number;
@@ -113,7 +141,7 @@ export const api = {
       search?: string;
       minFollowers?: number;
       maxFollowers?: number;
-    } = {}
+    } = {},
   ) => {
     const q = new URLSearchParams();
     if (params.limit) q.set("limit", String(params.limit));
@@ -121,85 +149,96 @@ export const api = {
     if (params.search) q.set("search", params.search);
     if (typeof params.minFollowers === "number") q.set("minFollowers", String(params.minFollowers));
     if (typeof params.maxFollowers === "number") q.set("maxFollowers", String(params.maxFollowers));
-    return jsonFetch<{ rows: Artist[]; total: number }>(`/api/artists?${q}`);
+    return cloudFetch<{ rows: Artist[]; total: number }>(`/api/artists?${q}`);
   },
-  getArtist: (username: string) => jsonFetch<ArtistDetail>(`/api/artists/${username}`),
-  listTags: () => jsonFetch<{ rows: Tag[] }>(`/api/tags`),
+  getArtist: (username: string) =>
+    cloudFetch<ArtistDetail>(`/api/artists/${encodeURIComponent(username)}`),
+
+  listTags: () => cloudFetch<{ rows: Tag[] }>(`/api/tags`),
   setTagTracked: (name: string, isTracked: boolean, priority?: number) =>
-    jsonFetch<Tag>(`/api/tags/${encodeURIComponent(name)}`, {
+    cloudFetch<Tag>(`/api/tags/${encodeURIComponent(name)}`, {
       method: "PATCH",
       body: JSON.stringify({ isTracked, priority }),
     }),
   createTag: (name: string, isTracked = true) =>
-    jsonFetch<Tag>(`/api/tags`, {
+    cloudFetch<Tag>(`/api/tags`, {
       method: "POST",
       body: JSON.stringify({ name, isTracked }),
     }),
   deleteTag: (name: string) =>
-    jsonFetch<{ ok: true }>(`/api/tags/${encodeURIComponent(name)}`, { method: "DELETE" }),
-  listJobs: () =>
-    jsonFetch<{ rows: Job[]; queue: QueueState }>(`/api/jobs`),
-  getJobLogs: (jobId: number) =>
-    jsonFetch<{ jobId: number; lines: Array<{ ts: number; stream: "stdout" | "stderr" | "system"; line: string }> }>(
-      `/api/logs/${jobId}`
-    ),
-  scrapeHashtag: (hashtag: string) =>
-    jsonFetch<Job>(`/api/jobs/scrape-hashtag`, {
-      method: "POST",
-      body: JSON.stringify({ hashtag }),
-    }),
-  scrapeArtist: (username: string) =>
-    jsonFetch<Job>(`/api/jobs/scrape-artist`, {
-      method: "POST",
-      body: JSON.stringify({ username }),
-    }),
-  runTracked: () =>
-    jsonFetch<{ enqueued: Job[] }>(`/api/jobs/run-tracked`, { method: "POST" }),
-  cancelJob: (jobId: number) =>
-    jsonFetch<{ ok: true; killed: boolean }>(`/api/jobs/${jobId}/cancel`, { method: "POST" }),
-  listPrompts: () => jsonFetch<{ rows: Prompt[] }>(`/api/prompts`),
+    cloudFetch<{ ok: true }>(`/api/tags/${encodeURIComponent(name)}`, { method: "DELETE" }),
+
+  listJobs: () => cloudFetch<{ rows: Job[] }>(`/api/jobs`),
+
+  listPrompts: () => cloudFetch<{ rows: Prompt[] }>(`/api/prompts`),
   createPrompt: (name: string, body: string, kind: PromptKind = "generate") =>
-    jsonFetch<Prompt>(`/api/prompts`, {
+    cloudFetch<Prompt>(`/api/prompts`, {
       method: "POST",
       body: JSON.stringify({ name, body, kind }),
     }),
   updatePrompt: (id: number, patch: { name?: string; body?: string; kind?: PromptKind }) =>
-    jsonFetch<Prompt>(`/api/prompts/${id}`, {
+    cloudFetch<Prompt>(`/api/prompts/${id}`, {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
   deletePrompt: (id: number) =>
-    jsonFetch<{ ok: true }>(`/api/prompts/${id}`, { method: "DELETE" }),
-  refinePrompt: (id: number, generationId: number, feedback: string) =>
-    jsonFetch<{ proposedBody: string }>(`/api/prompts/${id}/refine`, {
-      method: "POST",
-      body: JSON.stringify({ generationId, feedback }),
-    }),
+    cloudFetch<{ ok: true }>(`/api/prompts/${id}`, { method: "DELETE" }),
   undoPrompt: (id: number) =>
-    jsonFetch<Prompt>(`/api/prompts/${id}/undo`, { method: "POST" }),
+    cloudFetch<Prompt>(`/api/prompts/${id}/undo`, { method: "POST" }),
+
   listGenerations: (username: string) =>
-    jsonFetch<{ rows: Generation[] }>(`/api/generations/by-artist/${encodeURIComponent(username)}`),
-  generate: (username: string, promptId: number) =>
-    jsonFetch<Generation>(`/api/generations`, {
-      method: "POST",
-      body: JSON.stringify({ username, promptId }),
-    }),
+    cloudFetch<{ rows: Generation[] }>(
+      `/api/generations/by-artist/${encodeURIComponent(username)}`,
+    ),
   updateGeneration: (id: number, output: string) =>
-    jsonFetch<Generation>(`/api/generations/${id}`, {
+    cloudFetch<Generation>(`/api/generations/${id}`, {
       method: "PATCH",
       body: JSON.stringify({ output }),
     }),
   deleteGeneration: (id: number) =>
-    jsonFetch<{ ok: true }>(`/api/generations/${id}`, { method: "DELETE" }),
+    cloudFetch<{ ok: true }>(`/api/generations/${id}`, { method: "DELETE" }),
+
+  // ── ORCHESTRATION (local Hono — needs scraper running on user's laptop) ────
+  scrapeHashtag: (hashtag: string) =>
+    localFetch<Job>(`/api/jobs/scrape-hashtag`, {
+      method: "POST",
+      body: JSON.stringify({ hashtag }),
+    }),
+  scrapeArtist: (username: string) =>
+    localFetch<Job>(`/api/jobs/scrape-artist`, {
+      method: "POST",
+      body: JSON.stringify({ username }),
+    }),
+  runTracked: () => localFetch<{ enqueued: Job[] }>(`/api/jobs/run-tracked`, { method: "POST" }),
+  cancelJob: (jobId: number) =>
+    localFetch<{ ok: true; killed: boolean }>(`/api/jobs/${jobId}/cancel`, { method: "POST" }),
+  getQueueState: () => localFetch<QueueState>(`/api/jobs/queue`),
+  getJobLogs: (jobId: number) =>
+    localFetch<{
+      jobId: number;
+      lines: Array<{ ts: number; stream: "stdout" | "stderr" | "system"; line: string }>;
+    }>(`/api/logs/${jobId}`),
+  refinePrompt: (id: number, generationId: number, feedback: string) =>
+    localFetch<{ proposedBody: string }>(`/api/prompts/${id}/refine`, {
+      method: "POST",
+      body: JSON.stringify({ generationId, feedback }),
+    }),
+  generate: (username: string, promptId: number) =>
+    localFetch<Generation>(`/api/generations`, {
+      method: "POST",
+      body: JSON.stringify({ username, promptId }),
+    }),
 };
 
-/** Convert local image path on disk (data/images/...) to /images/... URL. */
-export function imageUrl(localPath: string | null | undefined): string | undefined {
-  if (!localPath) return undefined;
-  // localPath is stored as "./data/images/<user>/<file>" or "data/images/<user>/<file>".
-  const m = localPath.match(/data\/images\/(.+)$/);
-  if (m) return `/images/${m[1]}`;
-  return localPath.startsWith("/") ? localPath : `/images/${localPath}`;
+/** Build a Worker-proxied image URL from the R2 key (same-origin via Vite proxy in dev). */
+export function imageUrl(key: string | null | undefined): string | undefined {
+  if (!key) return undefined;
+  return `/api/images/${key.split("/").map(encodeURIComponent).join("/")}`;
+}
+
+/** SSE stream URL for the local server (only available in local-agent mode). */
+export function jobEventsUrl(): string {
+  return `${LOCAL_API}/events/jobs`;
 }
 
 export function relTime(iso: string | null | undefined): string {

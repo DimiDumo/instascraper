@@ -1,0 +1,31 @@
+name = "instascraper-api"
+main = "src/index.ts"
+compatibility_date = "2025-05-01"
+compatibility_flags = ["nodejs_compat"]
+
+account_id = "7e7599cd31883fe1990c1cd743eb90ee"
+
+# Bind the Worker to /api/* on the same subdomain as the Pages app so browser
+# requests are same-origin (CF Access cookie applies to <img>, fetch, SSE alike).
+routes = [
+  { pattern = "reo.gallerytalk.io/api/*", zone_name = "gallerytalk.io" },
+]
+
+# Keep the *.workers.dev URL working too so the local CLI's Service Token calls
+# don't depend on DNS being right.
+workers_dev = true
+
+[[d1_databases]]
+binding = "DB"
+database_name = "instascraper-db"
+database_id = "0f5305c6-5cdf-4a5d-bb57-a9f5893d0be3"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "IMAGES"
+bucket_name = "instascraper-images"
+
+[vars]
+# Set via `wrangler secret put CF_ACCESS_AUD` after creating the Access app.
+# CF_ACCESS_TEAM_DOMAIN is the *.cloudflareaccess.com host shown in Zero Trust dashboard.
+CF_ACCESS_TEAM_DOMAIN = "gallerytalk.cloudflareaccess.com"

@@ -11,7 +11,7 @@ Example: `/scrape-artist banksy`
 
 ## Prerequisites
 - Instagram session logged in for the active browser MCP (Claude-in-Chrome OR Playwright). See **Browser MCP Setup** in `AGENTS.md`.
-- Database schema pushed (`bun run db:push`).
+- Cloud provisioned: D1 + R2 + CF Access (`AGENTS.md` → **Cloud setup**). Local `.env` populated with `CLOUD_API_URL`, `CF_ACCESS_CLIENT_ID/SECRET`, `R2_*`.
 
 ## Browser tool mapping
 
@@ -76,10 +76,11 @@ bun run cli db save-artist '{
 }'
 ```
 
-### 6. Download profile picture
+### 6. Upload profile picture to R2
 ```bash
-bun run cli images download --url "<profile_pic_url>" --artist "<username>" --shortcode "profile" --index 0
+bun run cli images upload --url "<profile_pic_url>" --artist "<username>" --shortcode "profile" --index 0
 ```
+Downloads the CDN URL and PUTs to R2 under `<username>/profile.<ext>`; updates the artist row's `profilePicKey`.
 
 ### 7. Scrape recent posts (up to 50)
 
@@ -88,7 +89,7 @@ bun run cli images download --url "<profile_pic_url>" --artist "<username>" --sh
 ##### a. Click on the post thumbnail
 Use **click** to open the post modal.
 
-> **Faster alternative — Fast Grid Method:** Instead of clicking each post, extract all shortcodes + image URLs + alt-text captions from the profile grid in one **run-js** call (logging URLs via `console.log`), then **read-console** and download images via `curl`. Full recipe in `.claude/skills/scrape-hashtag.md` → "Fast Grid Method". Recommended for ≤10 posts; only fall back to per-post clicking when you need full caption / likes / posted-at fields.
+> **Faster alternative — Fast Grid Method:** Instead of clicking each post, extract all shortcodes + image URLs + alt-text captions from the profile grid in one **run-js** call (logging URLs via `console.log`), fetch likes/comments/postedAt for all posts in a single `web_profile_info` API call, then **read-console** and download images via `curl`. Full recipe in `.claude/skills/scrape-hashtag.md` → "Fast Grid Method" (Steps 1, 1b, 2, 3, 4). Recommended for ≤10 posts and now covers all stats — only fall back to per-post clicking when `web_profile_info` returns less than the requested 10 (older posts paginate beyond its window).
 
 ##### b. Extract post data
 - **Shortcode**: From URL
@@ -113,10 +114,11 @@ bun run cli db save-post '{
 }'
 ```
 
-##### d. Download images
+##### d. Upload images to R2
 ```bash
-bun run cli images download --url "<url>" --artist "<username>" --shortcode "<shortcode>" --index <n>
+bun run cli images upload --url "<url>" --artist "<username>" --shortcode "<shortcode>" --index <n>
 ```
+PUTs to R2 under `<username>/<shortcode>_<n>.<ext>`; updates the post's `imageKey` for the first image.
 
 ##### e. Update job progress
 ```bash
@@ -150,11 +152,11 @@ Common issues:
 ## Output
 
 The skill will save:
-- Complete artist profile to `artists` table
-- Profile picture to `./data/images/<username>/profile.jpg`
-- All posts to `posts` table
-- All images to `images` table (URLs, dimensions, local paths, download status)
-- All downloaded artwork to `./data/images/<username>/`
+- Complete artist profile to `artists` table in Cloudflare D1
+- Profile picture to R2 at `<username>/profile.jpg`
+- All posts to `posts` table in D1
+- All images to `images` table (URLs, dimensions, R2 keys, download status)
+- All downloaded artwork to R2 bucket `instascraper-images` under `<username>/<shortcode>_<n>.<ext>`
 - Hashtag associations for each post
 
 ## Notes

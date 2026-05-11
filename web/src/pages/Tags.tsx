@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, relTime } from "../lib/api";
+import { useCurrentMode } from "../lib/mode";
 
 export function Tags() {
   const qc = useQueryClient();
   const [newTag, setNewTag] = useState("");
+  const { mode } = useCurrentMode();
+  const localOnly = mode !== "local-agent";
   const { data, isLoading } = useQuery({
     queryKey: ["tags"],
     queryFn: api.listTags,
@@ -46,7 +49,8 @@ export function Tags() {
         </div>
         <button
           onClick={() => runTracked.mutate()}
-          disabled={tracked.length === 0 || runTracked.isPending}
+          disabled={tracked.length === 0 || runTracked.isPending || localOnly}
+          title={localOnly ? "Connect local scraper to run" : undefined}
           className="px-4 py-2 rounded bg-accent text-black font-medium text-sm hover:bg-accent/90 disabled:opacity-40"
         >
           {runTracked.isPending ? "queueing…" : `Run all tracked (${tracked.length})`}
@@ -81,6 +85,7 @@ export function Tags() {
               rows={tracked}
               onToggle={(t) => toggle.mutate({ name: t.name, isTracked: false })}
               onScrape={(t) => scrape.mutate(t.name)}
+              disableScrape={localOnly}
               trackedColumn
             />
           </Section>
@@ -89,6 +94,7 @@ export function Tags() {
               rows={untracked}
               onToggle={(t) => toggle.mutate({ name: t.name, isTracked: true })}
               onScrape={(t) => scrape.mutate(t.name)}
+              disableScrape={localOnly}
             />
           </Section>
         </>
@@ -112,11 +118,13 @@ function TagTable({
   onToggle,
   onScrape,
   trackedColumn,
+  disableScrape,
 }: {
   rows: Array<{ id: number; name: string; lastScrapedAt: string | null; linkedPosts: number; isTracked: boolean }>;
   onToggle: (t: { name: string }) => void;
   onScrape: (t: { name: string }) => void;
   trackedColumn?: boolean;
+  disableScrape?: boolean;
 }) {
   if (rows.length === 0) return <p className="text-muted text-sm py-2">none</p>;
   return (
@@ -139,7 +147,9 @@ function TagTable({
               <td className="px-3 py-2 text-right space-x-2">
                 <button
                   onClick={() => onScrape(t)}
-                  className="text-xs px-2 py-1 rounded bg-surface-2 hover:bg-surface-3"
+                  disabled={disableScrape}
+                  title={disableScrape ? "Connect local scraper to scrape" : undefined}
+                  className="text-xs px-2 py-1 rounded bg-surface-2 hover:bg-surface-3 disabled:opacity-40"
                 >
                   scrape
                 </button>

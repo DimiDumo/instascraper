@@ -1,25 +1,12 @@
 import { Hono } from "hono";
-import {
-  getArtistByUsername,
-  getPrompt,
-  listGenerationsByArtist,
-  createGeneration,
-  editGenerationOutput,
-  deleteGeneration,
-  getGeneration,
-} from "../../src/db";
+import * as cloud from "../../src/cloud/client";
 import { runGeneration } from "../../src/services/generate";
 
+// Local server only handles the POST kick-off: it creates the cloud row via the
+// Worker API, then spawns a local claude subprocess that fills the row in.
+// Read/edit/delete happen against the Worker directly from the web app.
 export const generationsRoute = new Hono();
 
-// GET /api/generations/by-artist/:username — list generations for one artist
-generationsRoute.get("/by-artist/:username", (c) => {
-  const artist = getArtistByUsername(c.req.param("username"));
-  if (!artist) return c.json({ error: "artist not found" }, 404);
-  return c.json({ rows: listGenerationsByArtist(artist.id) });
-});
-
-// POST /api/generations  { username, promptId } — kick off a new generation
 generationsRoute.post("/", async (c) => {
   const body = await c.req.json().catch(() => ({}));
   const username = (body?.username as string | undefined)?.trim();
@@ -27,53 +14,21 @@ generationsRoute.post("/", async (c) => {
   if (!username || !Number.isFinite(promptId)) {
     return c.json({ error: "username and promptId required" }, 400);
   }
-  const artist = getArtistByUsername(username);
-  if (!artist) return c.json({ error: "artist not found" }, 404);
-  const prompt = getPrompt(promptId);
+  const prompt = await cloud.prompts.get(promptId).catch(() => null);
   if (!prompt) return c.json({ error: "prompt not found" }, 404);
 
-  const row = createGeneration({
-    artistId: artist.id,
-    promptId: prompt.id,
+  const row = await cloud.generations.create({
+    username,
+    promptId,
     promptName: prompt.name,
-    output: "",
-    originalOutput: "",
-    status: "running",
   });
 
-  // fire-and-forget — runGeneration writes back via updateGeneration
+  // fire-and-forget — runGeneration writes back via cloud.generations.patch
   void runGeneration({
-    artistUsername: artist.username,
-    promptId: prompt.id,
+    artistUsername: username,
+    promptId,
     generationId: row.id,
   });
 
   return c.json(row);
-});
-
-// GET /api/generations/:id — useful for polling
-generationsRoute.get("/:id", (c) => {
-  const id = Number(c.req.param("id"));
-  if (!Number.isFinite(id)) return c.json({ error: "invalid id" }, 400);
-  const row = getGeneration(id);
-  if (!row) return c.json({ error: "not found" }, 404);
-  return c.json(row);
-});
-
-// PATCH /api/generations/:id  { output } — save user edits
-generationsRoute.patch("/:id", async (c) => {
-  const id = Number(c.req.param("id"));
-  if (!Number.isFinite(id)) return c.json({ error: "invalid id" }, 400);
-  const body = await c.req.json().catch(() => ({}));
-  if (typeof body?.output !== "string") return c.json({ error: "output required" }, 400);
-  const row = editGenerationOutput(id, body.output);
-  if (!row) return c.json({ error: "not found" }, 404);
-  return c.json(row);
-});
-
-generationsRoute.delete("/:id", (c) => {
-  const id = Number(c.req.param("id"));
-  if (!Number.isFinite(id)) return c.json({ error: "invalid id" }, 400);
-  deleteGeneration(id);
-  return c.json({ ok: true });
 });

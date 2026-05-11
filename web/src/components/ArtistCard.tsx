@@ -3,7 +3,7 @@ import type { Artist } from "../lib/api";
 import { imageUrl, relTime } from "../lib/api";
 
 export function ArtistCard({ artist }: { artist: Artist }) {
-  const pic = imageUrl(artist.profilePicLocalPath) ?? artist.profilePicUrl ?? undefined;
+  const pic = imageUrl(artist.profilePicKey) ?? artist.profilePicUrl ?? undefined;
   return (
     <Link
       to={`/artists/${artist.username}`}

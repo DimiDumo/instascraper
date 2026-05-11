@@ -19,7 +19,7 @@ export const artists = sqliteTable(
     followingCount: integer("following_count"),
     postsCount: integer("posts_count"),
     profilePicUrl: text("profile_pic_url"),
-    profilePicLocalPath: text("profile_pic_local_path"),
+    profilePicKey: text("profile_pic_key"),
     isVerified: integer("is_verified", { mode: "boolean" }).default(false),
     scrapedAt: integer("scraped_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
@@ -40,7 +40,7 @@ export const posts = sqliteTable(
     likesCount: integer("likes_count"),
     commentsCount: integer("comments_count"),
     postType: text("post_type", { enum: ["image", "video", "carousel"] }).default("image"),
-    imageLocalPath: text("image_local_path"),
+    imageKey: text("image_key"),
     postedAt: integer("posted_at", { mode: "timestamp" }),
     scrapedAt: integer("scraped_at", { mode: "timestamp" }),
     createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
@@ -61,7 +61,7 @@ export const images = sqliteTable(
       .notNull()
       .references(() => posts.id),
     url: text("url").notNull(),
-    localPath: text("local_path"),
+    r2Key: text("r2_key"),
     width: integer("width"),
     height: integer("height"),
     downloadedAt: integer("downloaded_at", { mode: "timestamp" }),
@@ -106,7 +106,7 @@ export const postHashtags = sqliteTable(
   ]
 );
 
-// Scrape jobs table - Track scraping jobs
+// Scrape jobs - status mirror of locally-run scrape jobs.
 export const scrapeJobs = sqliteTable(
   "scrape_jobs",
   {
@@ -126,9 +126,6 @@ export const scrapeJobs = sqliteTable(
   ]
 );
 
-// Prompts table - reusable instruction templates (e.g. "write a warm IG DM")
-// kind=generate: produce DM from artist context
-// kind=cleanup: post-process generated DM (e.g. strip em-dashes). Latest updated cleanup prompt auto-runs after every generation.
 export const prompts = sqliteTable(
   "prompts",
   {
@@ -143,7 +140,6 @@ export const prompts = sqliteTable(
   (table) => [index("idx_prompts_name").on(table.name), index("idx_prompts_kind").on(table.kind)]
 );
 
-// Generations - one per Generate click; promptId is nullable so deleting a prompt keeps history
 export const generations = sqliteTable(
   "generations",
   {
@@ -174,19 +170,13 @@ export const artistsRelations = relations(artists, ({ many }) => ({
 }));
 
 export const postsRelations = relations(posts, ({ one, many }) => ({
-  artist: one(artists, {
-    fields: [posts.artistId],
-    references: [artists.id],
-  }),
+  artist: one(artists, { fields: [posts.artistId], references: [artists.id] }),
   images: many(images),
   hashtags: many(postHashtags),
 }));
 
 export const imagesRelations = relations(images, ({ one }) => ({
-  post: one(posts, {
-    fields: [images.postId],
-    references: [posts.id],
-  }),
+  post: one(posts, { fields: [images.postId], references: [posts.id] }),
 }));
 
 export const hashtagsRelations = relations(hashtags, ({ many }) => ({
@@ -194,14 +184,8 @@ export const hashtagsRelations = relations(hashtags, ({ many }) => ({
 }));
 
 export const postHashtagsRelations = relations(postHashtags, ({ one }) => ({
-  post: one(posts, {
-    fields: [postHashtags.postId],
-    references: [posts.id],
-  }),
-  hashtag: one(hashtags, {
-    fields: [postHashtags.hashtagId],
-    references: [hashtags.id],
-  }),
+  post: one(posts, { fields: [postHashtags.postId], references: [posts.id] }),
+  hashtag: one(hashtags, { fields: [postHashtags.hashtagId], references: [hashtags.id] }),
 }));
 
 export const promptsRelations = relations(prompts, ({ many }) => ({
@@ -209,17 +193,10 @@ export const promptsRelations = relations(prompts, ({ many }) => ({
 }));
 
 export const generationsRelations = relations(generations, ({ one }) => ({
-  artist: one(artists, {
-    fields: [generations.artistId],
-    references: [artists.id],
-  }),
-  prompt: one(prompts, {
-    fields: [generations.promptId],
-    references: [prompts.id],
-  }),
+  artist: one(artists, { fields: [generations.artistId], references: [artists.id] }),
+  prompt: one(prompts, { fields: [generations.promptId], references: [prompts.id] }),
 }));
 
-// Type exports
 export type Artist = typeof artists.$inferSelect;
 export type NewArtist = typeof artists.$inferInsert;
 export type Post = typeof posts.$inferSelect;

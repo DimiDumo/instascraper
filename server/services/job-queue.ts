@@ -1,4 +1,4 @@
-import { createJob, listJobs, type ScrapeJob } from "../../src/db";
+import * as cloud from "../../src/cloud/client";
 import { emit } from "./events";
 
 export interface EnqueueInput {
@@ -7,28 +7,35 @@ export interface EnqueueInput {
 }
 
 /**
- * Manual mode: enqueue = insert pending row in DB. The user runs `/scrape-next`
- * inside their own Claude Code session to drain the queue. We don't spawn
- * subprocesses here so chrome MCP is owned by exactly one Claude instance
- * (the user's interactive one) and we avoid Playwright fallback.
+ * Manual mode: enqueue = insert pending row in cloud D1. The user runs
+ * `/scrape-next` inside their own Claude Code session to drain the queue. We
+ * don't spawn subprocesses here so Chrome MCP is owned by exactly one Claude
+ * instance (the user's interactive one) and we avoid Playwright fallback.
+ *
+ * State of pending/running jobs lives in D1 — this class is now stateless and
+ * just translates calls into cloud Worker requests.
  */
 class JobQueue {
-  enqueue(input: EnqueueInput): ScrapeJob {
-    const job = createJob({ jobType: input.jobType, target: input.target });
+  async enqueue(input: EnqueueInput) {
+    const job = await cloud.jobs.create(input.jobType, input.target);
     emit({ type: "queue.update" });
     emit({ type: "job.update", jobId: job.id });
     return job;
   }
 
-  status() {
-    const pending = listJobs({ limit: 100, status: "pending" }).map((j) => ({
+  async status() {
+    const [pendingRes, runningRes] = await Promise.all([
+      cloud.jobs.list({ limit: 100, status: "pending" }),
+      cloud.jobs.list({ limit: 1, status: "running" }),
+    ]);
+    const pending = pendingRes.rows.map((j: any) => ({
       jobId: j.id,
       jobType: j.jobType as "hashtag" | "artist",
       target: j.target,
     }));
-    const runningRows = listJobs({ limit: 1, status: "running" });
-    const running = runningRows[0]
-      ? { jobId: runningRows[0].id, jobType: runningRows[0].jobType as "hashtag" | "artist", target: runningRows[0].target }
+    const top = runningRes.rows[0];
+    const running = top
+      ? { jobId: top.id, jobType: top.jobType as "hashtag" | "artist", target: top.target }
       : null;
     return { running, pending };
   }

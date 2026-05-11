@@ -1,19 +1,22 @@
-import { resolve } from "node:path";
-import { getActiveCleanupPrompt, getArtistDetail, getPrompt, updateGeneration } from "../db";
+import * as cloud from "../cloud/client";
+import { downloadToTmp } from "../cloud/r2";
 
-const REPO_ROOT = resolve(import.meta.dir, "..", "..");
 const CLAUDE_BIN = process.env.CLAUDE_BIN || "claude";
 const TIMEOUT_MS = 180_000;
 const CLEANUP_TIMEOUT_MS = 90_000;
 const MAX_POSTS = 10;
 
-function absImagePath(localPath: string | null): string | null {
-  if (!localPath) return null;
-  if (localPath.startsWith("/")) return localPath;
-  return resolve(REPO_ROOT, localPath.replace(/^\.\//, ""));
+async function imagePathForKey(key: string | null | undefined): Promise<string | null> {
+  if (!key) return null;
+  try {
+    return await downloadToTmp(key);
+  } catch (err) {
+    console.warn(`[generate] failed to download ${key}:`, err);
+    return null;
+  }
 }
 
-function buildPromptInput(artist: NonNullable<ReturnType<typeof getArtistDetail>>, promptBody: string): string {
+async function buildPromptInput(artist: any, promptBody: string): Promise<string> {
   const lines: string[] = [];
   lines.push(promptBody.trim());
   lines.push("");
@@ -21,29 +24,32 @@ function buildPromptInput(artist: NonNullable<ReturnType<typeof getArtistDetail>
   lines.push("ARTIST CONTEXT");
   lines.push(`Username: @${artist.username}`);
   if (artist.fullName) lines.push(`Full name: ${artist.fullName}`);
-  if (artist.bio) lines.push(`Bio: ${artist.bio.replace(/\n/g, " ")}`);
+  if (artist.bio) lines.push(`Bio: ${String(artist.bio).replace(/\n/g, " ")}`);
   lines.push(
-    `Followers: ${artist.followersCount ?? "?"}  Following: ${artist.followingCount ?? "?"}  Posts: ${artist.postsCount ?? "?"}`
+    `Followers: ${artist.followersCount ?? "?"}  Following: ${artist.followingCount ?? "?"}  Posts: ${artist.postsCount ?? "?"}`,
   );
   lines.push("");
 
-  const recent = (artist.posts ?? []).slice(0, MAX_POSTS);
+  const recent = ((artist.posts ?? []) as any[]).slice(0, MAX_POSTS);
   if (recent.length > 0) {
     lines.push(`RECENT POSTS (top ${recent.length} by postedAt):`);
-    recent.forEach((post, i) => {
+    for (let i = 0; i < recent.length; i++) {
+      const post = recent[i];
       const caption = (post.caption ?? "").replace(/\s+/g, " ").trim().slice(0, 400);
       lines.push(
-        `${i + 1}. shortcode=${post.shortcode} likes=${post.likesCount ?? "?"} comments=${post.commentsCount ?? "?"}`
+        `${i + 1}. shortcode=${post.shortcode} likes=${post.likesCount ?? "?"} comments=${post.commentsCount ?? "?"}`,
       );
       if (caption) lines.push(`   caption: "${caption}"`);
-      const imgs = (post.images ?? [])
-        .map((img) => absImagePath(img.localPath))
-        .filter((p): p is string => Boolean(p));
-      if (imgs.length > 0) lines.push(`   images: ${imgs.join(", ")}`);
-    });
+      const imgKeys = [post.imageKey, ...((post.images ?? []) as any[]).map((img) => img.r2Key)]
+        .filter((k): k is string => Boolean(k));
+      const tmpPaths = (await Promise.all(imgKeys.map(imagePathForKey))).filter(
+        (p): p is string => Boolean(p),
+      );
+      if (tmpPaths.length > 0) lines.push(`   images: ${tmpPaths.join(", ")}`);
+    }
     lines.push("");
     lines.push(
-      "Use the Read tool to inspect any image paths above so you can reference what the artwork actually shows."
+      "Use the Read tool to inspect any image paths above so you can reference what the artwork actually shows.",
     );
   }
 
@@ -53,7 +59,7 @@ function buildPromptInput(artist: NonNullable<ReturnType<typeof getArtistDetail>
 }
 
 async function runCleanupPass(rawDm: string): Promise<string | null> {
-  const cleanup = getActiveCleanupPrompt();
+  const cleanup = (await cloud.prompts.list("cleanup")).rows[0];
   if (!cleanup) return null;
 
   const input = [
@@ -70,13 +76,17 @@ async function runCleanupPass(rawDm: string): Promise<string | null> {
 
   const proc = Bun.spawn(
     [CLAUDE_BIN, "-p", "--permission-mode", "acceptEdits", "--output-format", "text"],
-    { cwd: REPO_ROOT, stdin: "pipe", stdout: "pipe", stderr: "pipe" }
+    { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
   );
   proc.stdin.write(input);
   await proc.stdin.end();
 
   const timeout = setTimeout(() => {
-    try { proc.kill(); } catch { /* ignore */ }
+    try {
+      proc.kill();
+    } catch {
+      /* ignore */
+    }
   }, CLEANUP_TIMEOUT_MS);
 
   try {
@@ -102,24 +112,24 @@ export async function runGeneration(opts: {
 }): Promise<void> {
   const { artistUsername, promptId, generationId } = opts;
 
-  const artist = getArtistDetail(artistUsername);
+  const artist = await cloud.artists.detail(artistUsername).catch(() => null);
   if (!artist) {
-    updateGeneration(generationId, {
+    await cloud.generations.patch(generationId, {
       status: "failed",
       errorMessage: `artist not found: ${artistUsername}`,
     });
     return;
   }
-  const prompt = getPrompt(promptId);
+  const prompt = await cloud.prompts.get(promptId).catch(() => null);
   if (!prompt) {
-    updateGeneration(generationId, {
+    await cloud.generations.patch(generationId, {
       status: "failed",
       errorMessage: `prompt not found: ${promptId}`,
     });
     return;
   }
 
-  const input = buildPromptInput(artist, prompt.body);
+  const input = await buildPromptInput(artist, prompt.body);
 
   const proc = Bun.spawn(
     [
@@ -132,12 +142,7 @@ export async function runGeneration(opts: {
       "--output-format",
       "text",
     ],
-    {
-      cwd: REPO_ROOT,
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "pipe",
-    }
+    { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
   );
 
   proc.stdin.write(input);
@@ -160,7 +165,7 @@ export async function runGeneration(opts: {
     clearTimeout(timeout);
 
     if (exitCode !== 0) {
-      updateGeneration(generationId, {
+      await cloud.generations.patch(generationId, {
         status: "failed",
         errorMessage: stderr.trim() || `claude exited with code ${exitCode}`,
       });
@@ -169,17 +174,16 @@ export async function runGeneration(opts: {
 
     const rawOutput = stdout.trim();
     if (!rawOutput) {
-      updateGeneration(generationId, {
+      await cloud.generations.patch(generationId, {
         status: "failed",
         errorMessage: stderr.trim() || "empty output",
       });
       return;
     }
 
-    // Auto-chain: run latest cleanup prompt over the raw DM. Falls back to raw if cleanup fails.
     const cleaned = await runCleanupPass(rawOutput);
 
-    updateGeneration(generationId, {
+    await cloud.generations.patch(generationId, {
       status: "done",
       output: cleaned ?? rawOutput,
       originalOutput: rawOutput,
@@ -187,7 +191,7 @@ export async function runGeneration(opts: {
     });
   } catch (err) {
     clearTimeout(timeout);
-    updateGeneration(generationId, {
+    await cloud.generations.patch(generationId, {
       status: "failed",
       errorMessage: err instanceof Error ? err.message : String(err),
     });

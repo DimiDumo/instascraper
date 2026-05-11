@@ -42,8 +42,10 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 
-# Drizzle migrations (generated)
-drizzle/
-
 # Playwright MCP (generated)
 .playwright-mcp/
+
+# Cloudflare Worker local dev state
+cloud/.dev.vars
+cloud/.wrangler/
+.wrangler/

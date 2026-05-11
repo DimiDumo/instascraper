@@ -9,8 +9,8 @@ export function ImageGrid({ posts }: { posts: Post[] }) {
     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
       {posts.map((post) => {
         const src =
-          imageUrl(post.imageLocalPath) ??
-          imageUrl(post.images[0]?.localPath) ??
+          imageUrl(post.imageKey) ??
+          imageUrl(post.images[0]?.r2Key) ??
           post.images[0]?.url ??
           undefined;
         return (

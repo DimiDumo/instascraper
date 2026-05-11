@@ -1,0 +1,8 @@
+# Copy to .dev.vars (gitignored) for local `wrangler dev`.
+# In production set via `wrangler secret put <NAME>`.
+
+# Audience tag from the Cloudflare Access application (Zero Trust → Access → Applications → your app → Overview → AUD).
+CF_ACCESS_AUD=
+
+# Team domain, e.g. dimitri.cloudflareaccess.com
+CF_ACCESS_TEAM_DOMAIN=

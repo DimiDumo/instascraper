@@ -1,4 +1,4 @@
-import { upsertArtist, type NewArtist } from "../db";
+import * as cloud from "../cloud/client";
 
 export interface ArtistData {
   username: string;
@@ -11,8 +11,8 @@ export interface ArtistData {
   isVerified?: boolean;
 }
 
-export function saveArtist(data: ArtistData) {
-  const artistData: NewArtist = {
+export async function saveArtist(data: ArtistData) {
+  const result = await cloud.artists.upsert({
     username: data.username,
     fullName: data.fullName,
     bio: data.bio,
@@ -21,18 +21,15 @@ export function saveArtist(data: ArtistData) {
     postsCount: data.postsCount,
     profilePicUrl: data.profilePicUrl,
     isVerified: data.isVerified,
-  };
-
-  const result = upsertArtist(artistData);
+  });
   console.log(`Artist saved: @${data.username} (ID: ${result.id})`);
   return result;
 }
 
-// CLI handler
-export function handleSaveArtist(jsonData: string) {
+export async function handleSaveArtist(jsonData: string) {
   try {
     const data: ArtistData = JSON.parse(jsonData);
-    const result = saveArtist(data);
+    const result = await saveArtist(data);
     console.log(JSON.stringify({ success: true, id: result.id }));
     return result;
   } catch (error) {

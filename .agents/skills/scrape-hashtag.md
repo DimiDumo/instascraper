@@ -26,7 +26,7 @@ We're looking for **emerging artists** who:
 
 ## Prerequisites
 - Instagram session logged in for the active browser MCP (Claude-in-Chrome OR Playwright). See **Browser MCP Setup** in `AGENTS.md`.
-- Database schema pushed (`bun run db:push`).
+- Cloud provisioned: D1 + R2 + CF Access (`AGENTS.md` → **Cloud setup**). Local `.env` populated with `CLOUD_API_URL`, `CF_ACCESS_CLIENT_ID/SECRET`, `R2_*`.
 
 ## Browser tool mapping
 
@@ -248,65 +248,92 @@ This returns the alt text directly (which IS the artist's caption):
 ]
 ```
 
-**Step 2: Read URLs from console**
+**Step 1b: Fetch likes/comments via web_profile_info API**
 
-Use **read-console** (level `info` if the MCP supports filtering) to retrieve the logged URLs, then filter for `IMGURL` entries.
+Instagram's profile page DOM does not expose per-post like/comment counts. The undocumented `web_profile_info` endpoint does, uses session cookies, and returns up to ~12 most recent posts in one call. Run on the artist's profile tab (same origin → cookies sent automatically):
+
+```javascript
+fetch('https://i.instagram.com/api/v1/users/web_profile_info/?username=<username>', {
+  headers: {'x-ig-app-id':'936619743392459'}
+}).then(r=>r.json()).then(j=>{
+  var edges = (j.data && j.data.user && j.data.user.edge_owner_to_timeline_media && j.data.user.edge_owner_to_timeline_media.edges) || [];
+  for(var i=0;i<edges.length;i++){
+    var n = edges[i].node;
+    var likes = (n.edge_media_preview_like && n.edge_media_preview_like.count) || (n.edge_liked_by && n.edge_liked_by.count) || 0;
+    var comments = (n.edge_media_to_comment && n.edge_media_to_comment.count) || 0;
+    var ts = n.taken_at_timestamp ? new Date(n.taken_at_timestamp*1000).toISOString() : '';
+    console.log('STATS:'+n.shortcode+':'+likes+':'+comments+':'+ts);
+  }
+  console.log('STATS_DONE:'+edges.length);
+});
+```
+
+Replace `<username>` with the artist's handle. The `x-ig-app-id` header value `936619743392459` is the public web client ID.
+
+**Step 2: Read URLs and stats from console**
+
+Use **read-console** to retrieve both the `IMGURL:` entries from Step 1 and the `STATS:` entries from Step 1b.
 
 - Playwright: `browser_console_messages` (no level filter — filter the result client-side).
-- Claude-in-Chrome: `read_console_messages` (supports a `pattern` regex; pass `IMGURL` to pre-filter).
+- Claude-in-Chrome: `read_console_messages` (supports a `pattern` regex; pass `IMGURL|STATS` to pre-filter).
 
-This returns entries like:
+Entries look like:
 ```
 IMGURL:DTAXX54EZxZ:https://instagram.fsgn2-6.fna.fbcdn.net/v/t51.82787-15/...
+STATS:DTAXX54EZxZ:1234:56:2026-04-21T10:15:00.000Z
 ```
 
-**Step 3: Download all images via curl**
+Build a map `shortcode → {likes, comments, postedAt}` from the `STATS:` lines, then merge with the grid data from Step 1.
 
-For each URL extracted, download directly via curl:
+**Step 3: Upload all images to R2**
+
+For each URL extracted, run the CLI uploader. It downloads the CDN bytes and PUTs to R2 under the canonical key `<username>/<shortcode>_<n>.<ext>`, and also writes the key back into the post's `imageKey` column in D1.
 
 ```bash
-# Create artist directory
-mkdir -p ./data/images/<username>
-
-# Download each image (can run in parallel)
-curl -s -o "./data/images/<username>/<shortcode>_0.jpg" "<image_url>"
+bun run cli images upload --url "<image_url>" --artist "<username>" --shortcode "<shortcode>" --index 0
 ```
 
 Example:
 ```bash
-curl -s -o "./data/images/sofia.portraits/DTAXX54EZxZ_0.jpg" "https://instagram.fsgn2-6.fna.fbcdn.net/v/t51.82787-15/610538973_..."
+bun run cli images upload \
+  --url "https://instagram.fsgn2-6.fna.fbcdn.net/v/t51.82787-15/610538973_..." \
+  --artist "sofia.portraits" --shortcode "DTAXX54EZxZ" --index 0
 ```
 
-**Step 4: Save posts to database with caption**
+**Step 4: Save posts to database with caption + stats**
 
-The alt text from Step 1 serves as the caption (Instagram's auto-generated description). For each post:
+The alt text from Step 1 serves as the caption (Instagram's auto-generated description). The stats from Step 1b supply likes/comments/postedAt. For each post:
 
 ```bash
 bun run cli db save-post '{
   "shortcode": "<shortcode>",
   "artistUsername": "<username>",
   "postType": "image",
-  "caption": "<alt text from grid>"
+  "caption": "<alt text from grid>",
+  "likesCount": <likes from STATS map>,
+  "commentsCount": <comments from STATS map>,
+  "postedAt": "<ISO timestamp from STATS map>"
 }'
 ```
 
-Example with actual caption:
+Example with actual data:
 ```bash
 bun run cli db save-post '{
   "shortcode": "DScuKtXDUbp",
   "artistUsername": "da_frames",
   "postType": "image",
-  "caption": "Timeless • 久遠 #kyoto #photography #winter"
+  "caption": "Timeless • 久遠 #kyoto #photography #winter",
+  "likesCount": 1234,
+  "commentsCount": 56,
+  "postedAt": "2026-04-21T10:15:00.000Z"
 }'
 ```
 
+If a shortcode is missing from the `STATS` map (e.g. older post not returned by `web_profile_info`), omit `likesCount`/`commentsCount` rather than passing `0` — preserves NULL in DB so it's clear data was unavailable vs. zero engagement.
+
 > **Note:** The alt text IS the artist's actual caption when they provide one. Instagram only auto-generates a description (like "May be an image of...") when the artist leaves the caption empty. So this alt text is the primary source for captions.
 
-Then update the image path:
-```bash
-# The image is already in place, just update the DB
-bun run cli db update-post-image "<shortcode>" "./data/images/<username>/<shortcode>_0.jpg"
-```
+The `images upload` command in Step 3 already wrote the `imageKey` back to D1 — no extra update step needed.
 
 **Step 5: (Optional) Get full captions/likes for specific posts**
 
@@ -350,18 +377,19 @@ bun run cli job complete <job_id> <total_artists_scraped>
 
 ## Output Structure
 
+R2 bucket `instascraper-images`:
 ```
-./data/images/
-  └── <username>/
-      ├── <shortcode>_0.jpg
-      ├── <shortcode>_1.jpg
-      └── ...
+<username>/
+  ├── profile.jpg
+  ├── <shortcode>_0.jpg
+  ├── <shortcode>_1.jpg
+  └── ...
 ```
 
-Database records:
-- `artists` - Emerging artist profiles (GalleryTalk.io prospects)
-- `posts` - Post metadata with `image_local_path` linking to downloaded image
-- `images` - Individual images from posts with URLs and local paths
+D1 records:
+- `artists` - Emerging artist profiles with `profilePicKey` referencing R2
+- `posts` - Post metadata with `imageKey` referencing R2 thumbnail
+- `images` - Individual images from posts with URLs and `r2Key`
 - `hashtags` / `post_hashtags` - Tracked hashtags and post associations
 - `scrape_jobs` - Job tracking for scrape operations
 

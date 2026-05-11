@@ -73,10 +73,32 @@ for(var i=0; i<10 && i<posts.length; i++){
 JSON.stringify(data)
 ```
 
-Read URLs from console:
+#### c2. Fetch likes/comments/postedAt via web_profile_info
+
+Profile DOM does not expose per-post engagement. The `web_profile_info` endpoint returns the ~12 most recent posts with full stats in one call. Run on the artist's profile tab so session cookies are sent:
+
+```javascript
+fetch('https://i.instagram.com/api/v1/users/web_profile_info/?username=<username>', {
+  headers: {'x-ig-app-id':'936619743392459'}
+}).then(r=>r.json()).then(j=>{
+  var edges = (j.data && j.data.user && j.data.user.edge_owner_to_timeline_media && j.data.user.edge_owner_to_timeline_media.edges) || [];
+  for(var i=0;i<edges.length;i++){
+    var n = edges[i].node;
+    var likes = (n.edge_media_preview_like && n.edge_media_preview_like.count) || (n.edge_liked_by && n.edge_liked_by.count) || 0;
+    var comments = (n.edge_media_to_comment && n.edge_media_to_comment.count) || 0;
+    var ts = n.taken_at_timestamp ? new Date(n.taken_at_timestamp*1000).toISOString() : '';
+    console.log('STATS:'+n.shortcode+':'+likes+':'+comments+':'+ts);
+  }
+  console.log('STATS_DONE:'+edges.length);
+});
 ```
-read_console_messages(tabId, pattern="IMGURL", limit=20)
+
+Read both `IMGURL:` and `STATS:` entries from console:
 ```
+read_console_messages(tabId, pattern="IMGURL|STATS", limit=40)
+```
+
+Build a `shortcode → {likes, comments, postedAt}` map from `STATS:` lines.
 
 #### d. Download images
 ```bash
@@ -84,11 +106,13 @@ mkdir -p ./data/images/<username>
 curl -s -o "./data/images/<username>/<shortcode>_0.jpg" "<image_url>"
 ```
 
-#### e. Save posts
+#### e. Save posts (with stats)
 ```bash
-bun run cli db save-post '{"shortcode": "<sc>", "artistUsername": "<user>", "postType": "image", "caption": "<alt>"}'
+bun run cli db save-post '{"shortcode": "<sc>", "artistUsername": "<user>", "postType": "image", "caption": "<alt>", "likesCount": <likes>, "commentsCount": <comments>, "postedAt": "<iso>"}'
 bun run cli db update-post-image "<shortcode>" "./data/images/<username>/<shortcode>_0.jpg"
 ```
+
+If a shortcode is not in the STATS map (older post beyond the API window), omit `likesCount`/`commentsCount` so DB stays NULL rather than misleading `0`.
 
 ### 5. Complete Job
 ```bash
