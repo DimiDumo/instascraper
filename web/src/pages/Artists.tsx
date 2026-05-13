@@ -10,8 +10,7 @@ export function Artists() {
   const [maxFollowersInput, setMaxFollowersInput] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<DmStatus>>(new Set());
 
-  const minFollowers =
-    minFollowersInput.trim() === "" ? undefined : Number(minFollowersInput);
+  const minFollowers = minFollowersInput.trim() === "" ? undefined : Number(minFollowersInput);
   const maxFollowers =
     maxFollowersInput.trim() === "" ? undefined : Number(maxFollowersInput);
   const validMin = typeof minFollowers === "number" && Number.isFinite(minFollowers) ? minFollowers : undefined;

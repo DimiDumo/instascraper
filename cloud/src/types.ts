@@ -6,6 +6,7 @@ export interface Env {
   HUBSPOT_SERVICE_KEY: string;
 }
 
+
 export type AppBindings = {
   Bindings: Env;
   Variables: {
