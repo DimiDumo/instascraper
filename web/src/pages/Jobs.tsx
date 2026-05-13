@@ -94,7 +94,7 @@ export function Jobs() {
               <p className="text-muted text-sm">empty</p>
             ) : (
               <ul className="space-y-1">
-                {queue!.pending.map((q, i) => (
+                {[...queue!.pending].reverse().map((q, i) => (
                   <li key={q.jobId} className="text-sm bg-panel border border-border rounded px-3 py-2">
                     <span className="text-muted mr-2">#{i + 1}</span>
                     <span className="font-mono">
