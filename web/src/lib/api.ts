@@ -12,6 +12,8 @@
 const CLOUD_API = ""; // relative
 const LOCAL_API = (import.meta.env.VITE_LOCAL_API_URL as string | undefined)?.replace(/\/$/, "") ?? "http://localhost:3737";
 
+export type DmStatus = "none" | "draft" | "synced" | "ready" | "sent";
+
 export interface Artist {
   id: number;
   username: string;
@@ -24,8 +26,17 @@ export interface Artist {
   profilePicUrl: string | null;
   isVerified: boolean | null;
   scrapedAt: string | null;
+  hubspotContactId: string | null;
+  hubspotSyncedAt: string | null;
+  dmStatus: DmStatus;
   createdAt: string | null;
   updatedAt: string | null;
+}
+
+export interface HubSpotSyncResult {
+  hubspotContactId: string;
+  hubspotSyncedAt: string;
+  hasDm: boolean;
 }
 
 export interface Image {
@@ -103,8 +114,17 @@ export interface Generation {
   model: string | null;
   status: "running" | "done" | "failed";
   errorMessage: string | null;
+  readyToSendAt: string | null;
+  sentAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
+}
+
+export interface MarkSentResult {
+  generationId: number;
+  sentAt: string;
+  leadStatus: "updated" | "skipped";
+  noteId: string;
 }
 
 async function cloudFetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -141,6 +161,7 @@ export const api = {
       search?: string;
       minFollowers?: number;
       maxFollowers?: number;
+      dmStatuses?: DmStatus[];
     } = {},
   ) => {
     const q = new URLSearchParams();
@@ -149,6 +170,8 @@ export const api = {
     if (params.search) q.set("search", params.search);
     if (typeof params.minFollowers === "number") q.set("minFollowers", String(params.minFollowers));
     if (typeof params.maxFollowers === "number") q.set("maxFollowers", String(params.maxFollowers));
+    if (params.dmStatuses && params.dmStatuses.length > 0)
+      q.set("dmStatus", params.dmStatuses.join(","));
     return cloudFetch<{ rows: Artist[]; total: number }>(`/api/artists?${q}`);
   },
   getArtist: (username: string) =>
@@ -198,6 +221,17 @@ export const api = {
   deleteGeneration: (id: number) =>
     cloudFetch<{ ok: true }>(`/api/generations/${id}`, { method: "DELETE" }),
 
+  syncHubspot: (username: string) =>
+    cloudFetch<HubSpotSyncResult>(
+      `/api/hubspot/sync/${encodeURIComponent(username)}`,
+      { method: "POST" },
+    ),
+
+  markGenerationReady: (id: number) =>
+    cloudFetch<Generation>(`/api/hubspot/generations/${id}/ready`, { method: "POST" }),
+  markGenerationSent: (id: number) =>
+    cloudFetch<MarkSentResult>(`/api/hubspot/generations/${id}/sent`, { method: "POST" }),
+
   // ── ORCHESTRATION (local Hono — needs scraper running on user's laptop) ────
   scrapeHashtag: (hashtag: string) =>
     localFetch<Job>(`/api/jobs/scrape-hashtag`, {
@@ -227,6 +261,11 @@ export const api = {
     localFetch<Generation>(`/api/generations`, {
       method: "POST",
       body: JSON.stringify({ username, promptId }),
+    }),
+  previewGeneration: (username: string, body: string) =>
+    localFetch<{ output: string; originalOutput: string }>(`/api/generations/preview`, {
+      method: "POST",
+      body: JSON.stringify({ username, body }),
     }),
 };
 

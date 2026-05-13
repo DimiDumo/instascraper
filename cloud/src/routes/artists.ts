@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import type { AppBindings } from "../types";
 import { makeDb } from "../db/client";
-import { listArtists, getArtistDetail, upsertArtist, getArtistByUsername, getArtistById } from "../db/queries";
+import { listArtists, getArtistDetail, upsertArtist, getArtistByUsername, getArtistById, type DmStatus } from "../db/queries";
+
+const VALID_DM_STATUSES: readonly DmStatus[] = ["none", "draft", "synced", "ready", "sent"];
 
 export const artistsRoute = new Hono<AppBindings>();
 
@@ -12,12 +14,20 @@ artistsRoute.get("/", async (c) => {
   const search = url.searchParams.get("search") ?? undefined;
   const minFollowers = url.searchParams.get("minFollowers");
   const maxFollowers = url.searchParams.get("maxFollowers");
+  const dmStatusRaw = url.searchParams.get("dmStatus");
+  const dmStatuses = dmStatusRaw
+    ? dmStatusRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s): s is DmStatus => VALID_DM_STATUSES.includes(s as DmStatus))
+    : undefined;
   const result = await listArtists(makeDb(c.env.DB), {
     limit,
     offset,
     search,
     minFollowers: minFollowers ? Number(minFollowers) : undefined,
     maxFollowers: maxFollowers ? Number(maxFollowers) : undefined,
+    dmStatuses,
   });
   return c.json(result);
 });

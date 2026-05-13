@@ -105,31 +105,14 @@ async function runCleanupPass(rawDm: string): Promise<string | null> {
   }
 }
 
-export async function runGeneration(opts: {
+export async function runPromptAgainstArtist(opts: {
   artistUsername: string;
-  promptId: number;
-  generationId: number;
-}): Promise<void> {
-  const { artistUsername, promptId, generationId } = opts;
+  promptBody: string;
+}): Promise<{ output: string; originalOutput: string }> {
+  const artist = await cloud.artists.detail(opts.artistUsername).catch(() => null);
+  if (!artist) throw new Error(`artist not found: ${opts.artistUsername}`);
 
-  const artist = await cloud.artists.detail(artistUsername).catch(() => null);
-  if (!artist) {
-    await cloud.generations.patch(generationId, {
-      status: "failed",
-      errorMessage: `artist not found: ${artistUsername}`,
-    });
-    return;
-  }
-  const prompt = await cloud.prompts.get(promptId).catch(() => null);
-  if (!prompt) {
-    await cloud.generations.patch(generationId, {
-      status: "failed",
-      errorMessage: `prompt not found: ${promptId}`,
-    });
-    return;
-  }
-
-  const input = await buildPromptInput(artist, prompt.body);
+  const input = await buildPromptInput(artist, opts.promptBody);
 
   const proc = Bun.spawn(
     [
@@ -165,32 +148,47 @@ export async function runGeneration(opts: {
     clearTimeout(timeout);
 
     if (exitCode !== 0) {
-      await cloud.generations.patch(generationId, {
-        status: "failed",
-        errorMessage: stderr.trim() || `claude exited with code ${exitCode}`,
-      });
-      return;
+      throw new Error(stderr.trim() || `claude exited with code ${exitCode}`);
     }
-
     const rawOutput = stdout.trim();
-    if (!rawOutput) {
-      await cloud.generations.patch(generationId, {
-        status: "failed",
-        errorMessage: stderr.trim() || "empty output",
-      });
-      return;
-    }
+    if (!rawOutput) throw new Error(stderr.trim() || "empty output");
 
     const cleaned = await runCleanupPass(rawOutput);
+    return { output: cleaned ?? rawOutput, originalOutput: rawOutput };
+  } catch (err) {
+    clearTimeout(timeout);
+    throw err;
+  }
+}
 
+export async function runGeneration(opts: {
+  artistUsername: string;
+  promptId: number;
+  generationId: number;
+}): Promise<void> {
+  const { artistUsername, promptId, generationId } = opts;
+
+  const prompt = await cloud.prompts.get(promptId).catch(() => null);
+  if (!prompt) {
+    await cloud.generations.patch(generationId, {
+      status: "failed",
+      errorMessage: `prompt not found: ${promptId}`,
+    });
+    return;
+  }
+
+  try {
+    const { output, originalOutput } = await runPromptAgainstArtist({
+      artistUsername,
+      promptBody: prompt.body,
+    });
     await cloud.generations.patch(generationId, {
       status: "done",
-      output: cleaned ?? rawOutput,
-      originalOutput: rawOutput,
+      output,
+      originalOutput,
       model: "claude-code",
     });
   } catch (err) {
-    clearTimeout(timeout);
     await cloud.generations.patch(generationId, {
       status: "failed",
       errorMessage: err instanceof Error ? err.message : String(err),

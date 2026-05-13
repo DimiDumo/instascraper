@@ -14,6 +14,7 @@ import {
   handleNextJob,
   handlePendingCount,
 } from "./commands/job-status";
+import { handleInitProperties, handleSync } from "./commands/hubspot";
 
 const program = new Command();
 
@@ -129,6 +130,24 @@ jobCmd
   .description("Print count of pending jobs as JSON")
   .action(async () => {
     await handlePendingCount();
+  });
+
+// HubSpot commands
+const hubspotCmd = program.command("hubspot").description("HubSpot CRM sync");
+
+hubspotCmd
+  .command("init-properties")
+  .description("Create the custom Contact properties used by the sync (idempotent)")
+  .action(async () => {
+    await handleInitProperties();
+  });
+
+hubspotCmd
+  .command("sync")
+  .description("Upsert an artist as a HubSpot Contact (with latest generated DM)")
+  .argument("<username>", "Instagram username")
+  .action(async (username) => {
+    await handleSync(username);
   });
 
 program.parseAsync();

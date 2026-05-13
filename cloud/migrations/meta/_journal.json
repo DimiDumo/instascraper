@@ -8,6 +8,20 @@
       "when": 1778474446029,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1778650785646,
+      "tag": "0001_hubspot_sync",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1778652638806,
+      "tag": "0002_send_state",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,7 @@ import { api, imageUrl, relTime } from "../lib/api";
 import { ImageGrid } from "../components/ImageGrid";
 import { GenerationCard } from "../components/GenerationCard";
 import { useCurrentMode } from "../lib/mode";
+import { hubspotContactUrl } from "../lib/hubspot";
 
 export function ArtistDetail() {
   const { username = "" } = useParams();
@@ -51,6 +52,11 @@ export function ArtistDetail() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["generations", username] }),
   });
 
+  const syncHubspot = useMutation({
+    mutationFn: () => api.syncHubspot(username),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["artists", username] }),
+  });
+
   if (isLoading) return <p className="text-muted">Loading…</p>;
   if (!artist) return <p className="text-muted">Artist not found.</p>;
 
@@ -74,7 +80,7 @@ export function ArtistDetail() {
             <span><strong className="text-fg">{(artist.postsCount ?? artist.posts.length).toLocaleString()}</strong> posts</span>
             <span>last scraped {relTime(artist.scrapedAt)}</span>
           </div>
-          <div className="mt-4 flex gap-2">
+          <div className="mt-4 flex gap-2 flex-wrap items-center">
             <a
               href={`https://instagram.com/${artist.username}/`}
               target="_blank"
@@ -84,13 +90,39 @@ export function ArtistDetail() {
               open on Instagram
             </a>
             <button
+              onClick={() => syncHubspot.mutate()}
+              disabled={syncHubspot.isPending}
+              className="text-xs px-3 py-1.5 rounded bg-accent/80 text-black hover:bg-accent disabled:opacity-50"
+            >
+              {syncHubspot.isPending
+                ? "syncing…"
+                : artist.hubspotContactId
+                  ? `re-sync to HubSpot · ${relTime(artist.hubspotSyncedAt)}`
+                  : "sync to HubSpot"}
+            </button>
+            {artist.hubspotContactId ? (
+              <a
+                href={hubspotContactUrl(artist.hubspotContactId) ?? "#"}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs px-3 py-1.5 rounded bg-surface-2 hover:bg-surface-3"
+              >
+                view in HubSpot ↗
+              </a>
+            ) : null}
+            <button
               onClick={() => rescrape.mutate()}
               disabled={rescrape.isPending || localOnly}
               title={localOnly ? "Connect local scraper to rescrape" : undefined}
-              className="text-xs px-3 py-1.5 rounded bg-accent/80 text-black hover:bg-accent disabled:opacity-50"
+              className="text-xs px-3 py-1.5 rounded bg-surface-2 hover:bg-surface-3 disabled:opacity-50"
             >
               {rescrape.isPending ? "queued…" : "rescrape"}
             </button>
+            {syncHubspot.error ? (
+              <span className="text-xs text-red-400">
+                {(syncHubspot.error as Error).message.slice(0, 80)}
+              </span>
+            ) : null}
           </div>
         </div>
       </div>
@@ -139,7 +171,12 @@ export function ArtistDetail() {
         {(generations?.rows.length ?? 0) > 0 && (
           <div className="space-y-3 mt-3">
             {generations!.rows.map((g) => (
-              <GenerationCard key={g.id} generation={g} username={username} />
+              <GenerationCard
+                key={g.id}
+                generation={g}
+                username={username}
+                hubspotContactId={artist.hubspotContactId}
+              />
             ))}
           </div>
         )}

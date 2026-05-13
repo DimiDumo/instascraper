@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import type { Artist } from "../lib/api";
 import { imageUrl, relTime } from "../lib/api";
+import { DM_STATUS_BADGE, DM_STATUS_LABEL } from "../lib/dmStatus";
 
 export function ArtistCard({ artist }: { artist: Artist }) {
   const pic = imageUrl(artist.profilePicKey) ?? artist.profilePicUrl ?? undefined;
@@ -20,7 +21,14 @@ export function ArtistCard({ artist }: { artist: Artist }) {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <div className="font-medium truncate">@{artist.username}</div>
+          <div className="flex items-center gap-2">
+            <div className="font-medium truncate">@{artist.username}</div>
+            <span
+              className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${DM_STATUS_BADGE[artist.dmStatus]}`}
+            >
+              {DM_STATUS_LABEL[artist.dmStatus]}
+            </span>
+          </div>
           {artist.fullName && (
             <div className="text-xs text-muted truncate">{artist.fullName}</div>
           )}

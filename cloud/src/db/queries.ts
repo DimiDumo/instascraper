@@ -42,14 +42,18 @@ export async function getArtistById(db: DB, id: number) {
   return db.query.artists.findFirst({ where: eq(artists.id, id) });
 }
 
+export type DmStatus = "none" | "draft" | "synced" | "ready" | "sent";
+const DM_STATUSES: readonly DmStatus[] = ["none", "draft", "synced", "ready", "sent"];
+
 export async function listArtists(db: DB, opts: {
   limit?: number;
   offset?: number;
   minFollowers?: number;
   maxFollowers?: number;
   search?: string;
+  dmStatuses?: DmStatus[];
 } = {}) {
-  const { limit = 60, offset = 0, minFollowers, maxFollowers, search } = opts;
+  const { limit = 60, offset = 0, minFollowers, maxFollowers, search, dmStatuses } = opts;
   const conditions = [] as any[];
   if (typeof minFollowers === "number") conditions.push(gte(artists.followersCount, minFollowers));
   if (typeof maxFollowers === "number") conditions.push(lte(artists.followersCount, maxFollowers));
@@ -62,17 +66,107 @@ export async function listArtists(db: DB, opts: {
       )!
     );
   }
-  const where = conditions.length ? and(...conditions) : undefined;
-  const rows = await db.query.artists.findMany({
-    where,
-    orderBy: desc(artists.scrapedAt),
-    limit,
-    offset,
-  });
-  const totalRow = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(artists)
-    .where(where ?? sql`1=1`);
+
+  // Rollup DM status per artist (furthest-in-funnel wins; sticky once sent).
+  // Built as a LEFT JOIN against an aggregate subquery so drizzle returns the
+  // value cleanly — a correlated subquery in .select() didn't project right.
+  // "synced" sits between draft and ready: artist is in HubSpot but no
+  // generation has been approved for sending yet.
+  const dmAgg = sql`(
+    select g.artist_id as artist_id,
+      max(g.sent_at) as max_sent_at,
+      max(g.ready_to_send_at) as max_ready_at,
+      max(case when g.status = 'done' then 1 end) as has_done
+    from generations g
+    group by g.artist_id
+  )`;
+
+  const dmStatusExpr = sql`case
+    when dm.max_sent_at is not null then 'sent'
+    when dm.max_ready_at is not null then 'ready'
+    when dm.has_done is not null and a.hubspot_contact_id is not null then 'synced'
+    when dm.has_done is not null then 'draft'
+    else 'none'
+  end`;
+
+  const filteredStatuses = (dmStatuses ?? []).filter((s): s is DmStatus =>
+    DM_STATUSES.includes(s as DmStatus),
+  );
+  if (filteredStatuses.length > 0) {
+    const list = sql.join(filteredStatuses.map((s) => sql`${s}`), sql`, `);
+    conditions.push(sql`(${dmStatusExpr}) in (${list})`);
+  }
+
+  const where = conditions.length ? and(...conditions) : sql`1=1`;
+
+  const result = await db.all<{
+    id: number;
+    username: string;
+    full_name: string | null;
+    bio: string | null;
+    followers_count: number | null;
+    following_count: number | null;
+    posts_count: number | null;
+    profile_pic_url: string | null;
+    profile_pic_key: string | null;
+    is_verified: number | null;
+    scraped_at: number | null;
+    hubspot_contact_id: string | null;
+    hubspot_synced_at: number | null;
+    created_at: number | null;
+    updated_at: number | null;
+    dm_status: DmStatus;
+  }>(sql`
+    select
+      a.id,
+      a.username,
+      a.full_name,
+      a.bio,
+      a.followers_count,
+      a.following_count,
+      a.posts_count,
+      a.profile_pic_url,
+      a.profile_pic_key,
+      a.is_verified,
+      a.scraped_at,
+      a.hubspot_contact_id,
+      a.hubspot_synced_at,
+      a.created_at,
+      a.updated_at,
+      ${dmStatusExpr} as dm_status
+    from ${artists} a
+    left join ${dmAgg} dm on dm.artist_id = a.id
+    where ${where}
+    order by a.scraped_at desc
+    limit ${limit} offset ${offset}
+  `);
+
+  const toDate = (n: number | null) => (n == null ? null : new Date(n * 1000));
+  const rows = result.map((r) => ({
+    id: r.id,
+    username: r.username,
+    fullName: r.full_name,
+    bio: r.bio,
+    followersCount: r.followers_count,
+    followingCount: r.following_count,
+    postsCount: r.posts_count,
+    profilePicUrl: r.profile_pic_url,
+    profilePicKey: r.profile_pic_key,
+    isVerified: r.is_verified == null ? null : Boolean(r.is_verified),
+    scrapedAt: toDate(r.scraped_at),
+    hubspotContactId: r.hubspot_contact_id,
+    hubspotSyncedAt: toDate(r.hubspot_synced_at),
+    createdAt: toDate(r.created_at),
+    updatedAt: toDate(r.updated_at),
+    dmStatus: (r.dm_status ?? "none") as DmStatus,
+  }));
+
+  const totalRow = await db.all<{ count: number }>(sql`
+    select count(*) as count
+    from ${artists} a
+    left join ${dmAgg} dm on dm.artist_id = a.id
+    where ${where}
+  `);
   return { rows, total: totalRow[0]?.count ?? 0 };
 }
 
@@ -347,8 +441,53 @@ export async function listGenerationsByArtist(db: DB, artistId: number) {
   });
 }
 
+export async function getLatestDoneGeneration(db: DB, artistId: number) {
+  return db.query.generations.findFirst({
+    where: and(eq(generations.artistId, artistId), eq(generations.status, "done")),
+    orderBy: desc(generations.createdAt),
+  });
+}
+
+export async function setArtistHubspotSync(
+  db: DB,
+  artistId: number,
+  hubspotContactId: string,
+) {
+  const now = new Date();
+  await db
+    .update(artists)
+    .set({ hubspotContactId, hubspotSyncedAt: now, updatedAt: now })
+    .where(eq(artists.id, artistId));
+  return now;
+}
+
 export async function getGeneration(db: DB, id: number) {
   return db.query.generations.findFirst({ where: eq(generations.id, id) });
+}
+
+export async function getGenerationWithArtist(db: DB, id: number) {
+  return db.query.generations.findFirst({
+    where: eq(generations.id, id),
+    with: { artist: true },
+  });
+}
+
+export async function markGenerationReady(db: DB, id: number) {
+  const now = new Date();
+  await db
+    .update(generations)
+    .set({ readyToSendAt: now, updatedAt: now })
+    .where(eq(generations.id, id));
+  return now;
+}
+
+export async function markGenerationSent(db: DB, id: number) {
+  const now = new Date();
+  await db
+    .update(generations)
+    .set({ sentAt: now, updatedAt: now })
+    .where(eq(generations.id, id));
+  return now;
 }
 
 export async function createGeneration(db: DB, data: NewGeneration) {

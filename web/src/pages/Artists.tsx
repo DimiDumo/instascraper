@@ -1,12 +1,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { api } from "../lib/api";
+import { api, type DmStatus } from "../lib/api";
 import { ArtistCard } from "../components/ArtistCard";
+import { DM_STATUSES, DM_STATUS_BADGE, DM_STATUS_LABEL } from "../lib/dmStatus";
 
 export function Artists() {
   const [search, setSearch] = useState("");
   const [minFollowersInput, setMinFollowersInput] = useState("");
   const [maxFollowersInput, setMaxFollowersInput] = useState("");
+  const [statusFilter, setStatusFilter] = useState<Set<DmStatus>>(new Set());
 
   const minFollowers =
     minFollowersInput.trim() === "" ? undefined : Number(minFollowersInput);
@@ -14,17 +16,28 @@ export function Artists() {
     maxFollowersInput.trim() === "" ? undefined : Number(maxFollowersInput);
   const validMin = typeof minFollowers === "number" && Number.isFinite(minFollowers) ? minFollowers : undefined;
   const validMax = typeof maxFollowers === "number" && Number.isFinite(maxFollowers) ? maxFollowers : undefined;
+  const dmStatuses = Array.from(statusFilter).sort();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["artists", search, validMin, validMax],
+    queryKey: ["artists", search, validMin, validMax, dmStatuses.join(",")],
     queryFn: () =>
       api.listArtists({
         search: search || undefined,
         minFollowers: validMin,
         maxFollowers: validMax,
+        dmStatuses: dmStatuses.length > 0 ? dmStatuses : undefined,
         limit: 120,
       }),
   });
+
+  const toggleStatus = (s: DmStatus) => {
+    setStatusFilter((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s);
+      else next.add(s);
+      return next;
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -57,6 +70,35 @@ export function Artists() {
             className="bg-panel border border-border rounded px-3 py-1.5 text-sm w-64 focus:outline-none focus:border-muted"
           />
         </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs text-muted mr-1">DM status:</span>
+        {DM_STATUSES.map((s) => {
+          const active = statusFilter.has(s);
+          return (
+            <button
+              key={s}
+              type="button"
+              onClick={() => toggleStatus(s)}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                active
+                  ? `${DM_STATUS_BADGE[s]} border-transparent`
+                  : "bg-panel border-border text-muted hover:text-fg hover:border-muted"
+              }`}
+            >
+              {DM_STATUS_LABEL[s]}
+            </button>
+          );
+        })}
+        {statusFilter.size > 0 && (
+          <button
+            type="button"
+            onClick={() => setStatusFilter(new Set())}
+            className="text-xs text-muted hover:text-fg ml-1"
+          >
+            clear
+          </button>
+        )}
       </div>
       {isLoading ? (
         <p className="text-muted">Loading…</p>

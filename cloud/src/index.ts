@@ -9,6 +9,7 @@ import { jobsRoute } from "./routes/jobs";
 import { promptsRoute } from "./routes/prompts";
 import { generationsRoute } from "./routes/generations";
 import { imagesRoute } from "./routes/images";
+import { hubspotRoute } from "./routes/hubspot";
 
 const app = new Hono<AppBindings>();
 
@@ -36,6 +37,7 @@ app.route("/api/jobs", jobsRoute);
 app.route("/api/prompts", promptsRoute);
 app.route("/api/generations", generationsRoute);
 app.route("/api/images", imagesRoute);
+app.route("/api/hubspot", hubspotRoute);
 
 app.notFound((c) => c.json({ error: "not found" }, 404));
 

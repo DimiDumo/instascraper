@@ -128,6 +128,20 @@ export const prompts = {
   undo: (id: number) => request<any>("POST", `/api/prompts/${id}/undo`),
 };
 
+// ============ HUBSPOT ============
+export const hubspot = {
+  initProperties: () =>
+    request<{ ok: boolean; results: Array<{ name: string; status: "exists" | "created" }> }>(
+      "POST",
+      "/api/hubspot/init-properties",
+    ),
+  sync: (username: string) =>
+    request<{ hubspotContactId: string; hubspotSyncedAt: string; hasDm: boolean }>(
+      "POST",
+      `/api/hubspot/sync/${encodeURIComponent(username)}`,
+    ),
+};
+
 // ============ GENERATIONS ============
 export const generations = {
   byArtist: (username: string) =>

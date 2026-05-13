@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import * as cloud from "../../src/cloud/client";
-import { runGeneration } from "../../src/services/generate";
+import { runGeneration, runPromptAgainstArtist } from "../../src/services/generate";
 
 // Local server only handles the POST kick-off: it creates the cloud row via the
 // Worker API, then spawns a local claude subprocess that fills the row in.
@@ -31,4 +31,19 @@ generationsRoute.post("/", async (c) => {
   });
 
   return c.json(row);
+});
+
+generationsRoute.post("/preview", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const username = (body?.username as string | undefined)?.trim();
+  const promptBody = (body?.body as string | undefined)?.trim();
+  if (!username || !promptBody) {
+    return c.json({ error: "username and body required" }, 400);
+  }
+  try {
+    const result = await runPromptAgainstArtist({ artistUsername: username, promptBody });
+    return c.json(result);
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
+  }
 });

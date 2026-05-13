@@ -2,15 +2,26 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, relTime, type Generation } from "../lib/api";
 
-export function GenerationCard({ generation, username }: { generation: Generation; username: string }) {
+export function GenerationCard({
+  generation,
+  username,
+  hubspotContactId,
+}: {
+  generation: Generation;
+  username: string;
+  hubspotContactId: string | null;
+}) {
   const qc = useQueryClient();
   const [output, setOutput] = useState(generation.output);
   const [copied, setCopied] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   const [refineOpen, setRefineOpen] = useState(false);
   const [feedback, setFeedback] = useState("");
   const [proposedBody, setProposedBody] = useState<string | null>(null);
   const [refineError, setRefineError] = useState<string | null>(null);
+  const [previewOutput, setPreviewOutput] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   // Keep textarea in sync if upstream value changes (e.g. polling fills in result)
   useEffect(() => {
@@ -27,6 +38,21 @@ export function GenerationCard({ generation, username }: { generation: Generatio
     onSuccess: () => qc.invalidateQueries({ queryKey: ["generations", username] }),
   });
 
+  const preview = useMutation({
+    mutationFn: (body: string) => {
+      if (!body.trim()) throw new Error("nothing to preview");
+      return api.previewGeneration(username, body);
+    },
+    onSuccess: (res) => {
+      setPreviewOutput(res.output);
+      setPreviewError(null);
+    },
+    onError: (err: unknown) => {
+      setPreviewError(err instanceof Error ? err.message : String(err));
+      setPreviewOutput(null);
+    },
+  });
+
   const refine = useMutation({
     mutationFn: () => {
       if (!generation.promptId) throw new Error("prompt was deleted; can't refine");
@@ -35,6 +61,9 @@ export function GenerationCard({ generation, username }: { generation: Generatio
     onSuccess: (res) => {
       setProposedBody(res.proposedBody);
       setRefineError(null);
+      setPreviewOutput(null);
+      setPreviewError(null);
+      preview.mutate(res.proposedBody);
     },
     onError: (err: unknown) => {
       setRefineError(err instanceof Error ? err.message : String(err));
@@ -56,11 +85,27 @@ export function GenerationCard({ generation, username }: { generation: Generatio
     },
   });
 
+  const markReady = useMutation({
+    mutationFn: () => api.markGenerationReady(generation.id),
+    onMutate: () => setSendError(null),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["generations", username] }),
+    onError: (err: unknown) => setSendError(err instanceof Error ? err.message : String(err)),
+  });
+
+  const markSent = useMutation({
+    mutationFn: () => api.markGenerationSent(generation.id),
+    onMutate: () => setSendError(null),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["generations", username] }),
+    onError: (err: unknown) => setSendError(err instanceof Error ? err.message : String(err)),
+  });
+
   const closeRefine = () => {
     setRefineOpen(false);
     setFeedback("");
     setProposedBody(null);
     setRefineError(null);
+    setPreviewOutput(null);
+    setPreviewError(null);
   };
 
   const dirty = output !== generation.output;
@@ -156,7 +201,39 @@ export function GenerationCard({ generation, username }: { generation: Generatio
             >
               {save.isPending ? "saving…" : dirty ? "save" : "saved"}
             </button>
+            {!generation.readyToSendAt ? (
+              <button
+                onClick={() => markReady.mutate()}
+                disabled={markReady.isPending || dirty}
+                title={dirty ? "save edits first" : undefined}
+                className="text-xs px-3 py-1.5 rounded bg-surface-2 hover:bg-surface-3 disabled:opacity-40"
+              >
+                {markReady.isPending ? "marking…" : "mark ready"}
+              </button>
+            ) : (
+              <span className="text-xs px-3 py-1.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">
+                ready · {relTime(generation.readyToSendAt)}
+              </span>
+            )}
+            {generation.readyToSendAt && !generation.sentAt && (
+              <button
+                onClick={() => markSent.mutate()}
+                disabled={markSent.isPending || !hubspotContactId}
+                title={!hubspotContactId ? "sync artist to HubSpot first" : undefined}
+                className="text-xs px-3 py-1.5 rounded bg-accent text-black font-medium hover:bg-accent/90 disabled:opacity-40"
+              >
+                {markSent.isPending ? "sending…" : "mark sent"}
+              </button>
+            )}
+            {generation.sentAt && (
+              <span className="text-xs px-3 py-1.5 rounded bg-violet-500/15 text-violet-700 dark:text-violet-300">
+                sent · {relTime(generation.sentAt)}
+              </span>
+            )}
           </div>
+          {sendError && (
+            <p className="text-xs text-rose-600 dark:text-rose-300 text-right">{sendError}</p>
+          )}
 
           {refineOpen && (
             <div className="border border-dashed border-border rounded p-3 mt-2 space-y-3 bg-panel/40">
@@ -199,10 +276,48 @@ export function GenerationCard({ generation, username }: { generation: Generatio
                   <label className="text-xs uppercase text-muted block">Proposed prompt (editable)</label>
                   <textarea
                     value={proposedBody}
-                    onChange={(e) => setProposedBody(e.target.value)}
+                    onChange={(e) => {
+                      setProposedBody(e.target.value);
+                      setPreviewOutput(null);
+                      setPreviewError(null);
+                    }}
                     rows={Math.max(6, Math.min(16, proposedBody.split("\n").length + 1))}
                     className="bg-panel border border-border rounded px-3 py-2 text-sm w-full font-mono focus:outline-none focus:border-muted"
                   />
+                  {preview.isPending && (
+                    <p className="text-xs text-muted">Generating preview DM with new prompt… (≤60s)</p>
+                  )}
+
+                  {!preview.isPending && previewOutput === null && (
+                    <div className="flex justify-end gap-2 flex-wrap">
+                      <button
+                        onClick={() => preview.mutate(proposedBody)}
+                        disabled={!proposedBody.trim()}
+                        className="text-xs px-3 py-1.5 rounded bg-surface-2 hover:bg-surface-3 disabled:opacity-40"
+                      >
+                        regenerate preview
+                      </button>
+                    </div>
+                  )}
+
+                  {previewError && (
+                    <pre className="text-xs text-rose-600 dark:text-rose-300 whitespace-pre-wrap font-mono">{previewError}</pre>
+                  )}
+
+                  {previewOutput !== null && (
+                    <div className="space-y-2">
+                      <label className="text-xs uppercase text-muted block">
+                        Preview DM (new prompt run against @{username})
+                      </label>
+                      <textarea
+                        value={previewOutput}
+                        onChange={(e) => setPreviewOutput(e.target.value)}
+                        rows={Math.max(3, Math.min(12, previewOutput.split("\n").length + 1))}
+                        className="bg-panel border border-border rounded px-3 py-2 text-sm w-full focus:outline-none focus:border-muted"
+                      />
+                    </div>
+                  )}
+
                   <div className="flex justify-end gap-2">
                     <button
                       onClick={closeRefine}
