@@ -118,10 +118,12 @@ export async function getPostsByArtist(db: DB, artistId: number) {
   });
 }
 
-export async function updatePostImageKey(db: DB, shortcode: string, key: string) {
-  await db.update(posts)
+export async function updatePostImageKey(db: DB, shortcode: string, key: string): Promise<boolean> {
+  const res = await db.update(posts)
     .set({ imageKey: key, updatedAt: new Date() })
-    .where(eq(posts.shortcode, shortcode));
+    .where(eq(posts.shortcode, shortcode))
+    .returning({ id: posts.id });
+  return res.length > 0;
 }
 
 // ============ IMAGES ============

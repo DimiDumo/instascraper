@@ -28,91 +28,57 @@ bun run cli job start <job_id>
 
 ### 2. Navigate to Hashtag
 ```
-navigate to https://www.instagram.com/explore/tags/<hashtag_name>/
+navigate to https://www.instagram.com/explore/search/keyword/?q=%23<hashtag_name>
 ```
-Wait 3 seconds for load.
+(`/explore/tags/<name>/` redirects here — either works.)
+
+Poll for posts to render instead of fixed sleep — run this JS every 2s, up to 10s:
+```js
+document.querySelectorAll('a[href*="/p/"]').length
+```
+Proceed once count > 0 (page typically needs 4–5s to hydrate).
+
+Then collect all post links + alt text in one shot:
+```js
+const items = Array.from(document.querySelectorAll('a[href*="/p/"]')).map(a => ({
+  post: a.href,
+  alt: a.querySelector('img')?.alt || ''
+}));
+console.log('POST_ITEMS:' + JSON.stringify([...new Map(items.map(i=>[i.post,i])).values()]));
+```
+Read console with pattern `POST_ITEMS`.
+
+Pre-filter from alt text before visiting profiles — skip where alt mentions: `school`, `course`, `brushes`, `tutorial`, `demo`, `proko`, `brainstorm`, `creative director`, `creatives`.
 
 ### 3. Discover Artists
 
-For each post in the grid:
-1. Click post to open modal
-2. Get username from header
-3. Navigate to `https://www.instagram.com/<username>/`
-4. Check followers (must be 1K-50K)
-5. Extract profile + 10 recent captions
-6. Run AI qualification (see `references/ai-evaluation.md`)
-7. If score >= 70: scrape artist
-8. If score < 70: skip
-9. Continue until 5-10 qualifying artists found
+For each post (after pre-filter):
+1. Navigate to post URL to get username (run-js on `a[href]` filtered to profile paths)
+2. Navigate to `https://www.instagram.com/<username>/`
+3. Check followers (must be 1K-50K)
+4. Extract profile + 10 recent captions
+5. Run AI qualification (see `references/ai-evaluation.md`)
+6. If score >= 70: scrape artist
+7. If score < 70: skip
+8. Continue until 5-10 qualifying artists found
 
-### 4. Scrape Qualifying Artist
+### 4. Scrape Qualifying Artist — delegate to `artist-scraper` subagent
 
-#### a. Extract profile data
-Use JavaScript to get: username, full name, bio, followers, following, posts count.
+For each qualifying artist (score ≥ 70), spawn the `artist-scraper` subagent. It owns profile extract + save-artist, Fast Grid Method (shortcodes + URLs + alt-text + `web_profile_info` stats), save-post loop, R2 image uploads, and `job progress` ticks. Keeps ~50–80KB of per-artist tool chatter out of main context.
 
-#### b. Save artist
-```bash
-bun run cli db save-artist '{"username": "<username>", "fullName": "<name>", "bio": "<bio>", "followersCount": <n>, "followingCount": <n>, "postsCount": <n>}'
+```
+Agent({
+  subagent_type: "artist-scraper",
+  description: "Scrape <username>",
+  prompt: "username: <username>\njob_id: <job_id>\nmax_posts: 10\nmcp: claude-in-chrome"   // or "playwright"
+})
 ```
 
-#### c. Extract posts from grid (Fast Method)
+Subagent's final message ends with one JSON line, e.g. `{"ok":true,"postsScraped":10,"imagesUploaded":11,"profilePicUploaded":true,"errors":[]}`. Parse it. On `ok:true` increment `artists_saved_so_far` and emit `bun run cli job progress <job_id> <artists_saved_so_far>`. On `ok:false` log the error and continue with the next candidate — do **not** fail the hashtag job.
 
-Run JavaScript to log URLs and get captions:
-```javascript
-var posts = document.querySelectorAll('a[href*="/p/"]');
-var data = [];
-for(var i=0; i<10 && i<posts.length; i++){
-  var a = posts[i];
-  var img = a.querySelector('img');
-  if(img && img.src){
-    var sc = a.href.split('/p/')[1].split('/')[0];
-    console.log('IMGURL:' + sc + ':' + img.src);
-    data.push({shortcode: sc, alt: img.alt || ''});
-  }
-}
-JSON.stringify(data)
-```
+**Sequential only:** wait for each subagent to return before invoking the next. Sleep 5s between invocations. Never run two `artist-scraper` instances in parallel (Instagram bot detection).
 
-#### c2. Fetch likes/comments/postedAt via web_profile_info
-
-Profile DOM does not expose per-post engagement. The `web_profile_info` endpoint returns the ~12 most recent posts with full stats in one call. Run on the artist's profile tab so session cookies are sent:
-
-```javascript
-fetch('https://i.instagram.com/api/v1/users/web_profile_info/?username=<username>', {
-  headers: {'x-ig-app-id':'936619743392459'}
-}).then(r=>r.json()).then(j=>{
-  var edges = (j.data && j.data.user && j.data.user.edge_owner_to_timeline_media && j.data.user.edge_owner_to_timeline_media.edges) || [];
-  for(var i=0;i<edges.length;i++){
-    var n = edges[i].node;
-    var likes = (n.edge_media_preview_like && n.edge_media_preview_like.count) || (n.edge_liked_by && n.edge_liked_by.count) || 0;
-    var comments = (n.edge_media_to_comment && n.edge_media_to_comment.count) || 0;
-    var ts = n.taken_at_timestamp ? new Date(n.taken_at_timestamp*1000).toISOString() : '';
-    console.log('STATS:'+n.shortcode+':'+likes+':'+comments+':'+ts);
-  }
-  console.log('STATS_DONE:'+edges.length);
-});
-```
-
-Read both `IMGURL:` and `STATS:` entries from console:
-```
-read_console_messages(tabId, pattern="IMGURL|STATS", limit=40)
-```
-
-Build a `shortcode → {likes, comments, postedAt}` map from `STATS:` lines.
-
-#### d. Download images
-```bash
-mkdir -p ./data/images/<username>
-curl -s -o "./data/images/<username>/<shortcode>_0.jpg" "<image_url>"
-```
-
-#### e. Save posts (with stats)
-```bash
-bun run cli db save-post '{"shortcode": "<sc>", "artistUsername": "<user>", "postType": "image", "caption": "<alt>", "likesCount": <likes>, "commentsCount": <comments>, "postedAt": "<iso>"}'
-bun run cli db update-post-image "<shortcode>" "./data/images/<username>/<shortcode>_0.jpg"
-```
-
-If a shortcode is not in the STATS map (older post beyond the API window), omit `likesCount`/`commentsCount` so DB stays NULL rather than misleading `0`.
+Subagent definition: `.claude/agents/artist-scraper.md` (canonical at `.agents/agents/artist-scraper.md`).
 
 ### 5. Complete Job
 ```bash

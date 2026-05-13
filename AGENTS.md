@@ -246,10 +246,16 @@ This project uses **canonical files and symlinks** so any agent harness (Claude,
 |-----------------|---------|---------|
 | `AGENTS.md` | `CLAUDE.md` | Agent context & project docs |
 | `.agents/skills/` | `.claude/skills/` | Reusable skills & workflows |
+| `.agents/agents/` | `.claude/agents/` | Subagent definitions (e.g. `artist-scraper`) |
 
 **Convention:** Always edit the canonical source. The symlink follows automatically.
 - Create new skills in `.agents/skills/` first, then add a symlink in `.claude/skills/`
+- Create new subagents in `.agents/agents/` first, then add a symlink in `.claude/agents/`
 - If an agent tool doesn't read `.agents/` natively, point it at the symlinked paths above
+
+### Subagent isolation for /scrape-next
+
+Per-artist scrape work is delegated to the **`artist-scraper`** subagent (`.agents/agents/artist-scraper.md`). `/scrape-next` and `/scrape-hashtag` spawn it once per artist so profile snapshots, Fast Grid Method console output, `save-post`, and `images upload` tool chatter stay out of main context (~50–80KB saved per artist). Subagent returns one JSON line with counts. **Sequential only** — never spawn multiple in parallel (Instagram bot detection). For harnesses without subagent support, inline the subagent body where the skill calls `Agent({subagent_type:"artist-scraper", ...})`.
 
 ## Project Structure
 

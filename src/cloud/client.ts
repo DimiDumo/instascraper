@@ -21,13 +21,24 @@ function authHeaders(extra: Record<string, string> = {}): Record<string, string>
   };
 }
 
+// Cloudflare Workers' JSON parser rejects lone surrogate code points.
+// Walk the payload and replace any lone surrogates with U+FFFD before serialising.
+function sanitizeForJson(val: unknown): unknown {
+  if (typeof val === "string")
+    return val.replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�");
+  if (Array.isArray(val)) return val.map(sanitizeForJson);
+  if (val !== null && typeof val === "object")
+    return Object.fromEntries(Object.entries(val as Record<string, unknown>).map(([k, v]) => [k, sanitizeForJson(v)]));
+  return val;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers: body !== undefined
       ? authHeaders({ "Content-Type": "application/json" })
       : authHeaders(),
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body: body !== undefined ? JSON.stringify(sanitizeForJson(body)) : undefined,
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");

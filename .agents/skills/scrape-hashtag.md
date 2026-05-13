@@ -61,15 +61,36 @@ bun run cli job progress <job_id> <artists_saved_so_far>
 ### 2. Navigate to Hashtag Page
 1. **list-tabs** — get current tabs
 2. **new-tab** — open a fresh tab
-3. **navigate** to `https://www.instagram.com/explore/tags/<hashtag_name>/`
-4. Wait 3 seconds for page load
+3. **navigate** to `https://www.instagram.com/explore/search/keyword/?q=%23<hashtag_name>`
+   - (`/explore/tags/<name>/` also works but redirects here)
+4. Poll until posts render — **run-js** this snippet; retry every 2s up to 10s:
+   ```js
+   document.querySelectorAll('a[href*="/p/"]').length
+   ```
+   Proceed once count > 0 (page typically needs 4–5s to hydrate).
+5. **run-js** to collect all post links + author alt-text in one shot:
+   ```js
+   const items = Array.from(document.querySelectorAll('a[href*="/p/"]')).map(a => ({
+     post: a.href,
+     alt: a.querySelector('img')?.alt || ''
+   }));
+   console.log('POST_ITEMS:' + JSON.stringify([...new Map(items.map(i=>[i.post,i])).values()]));
+   ```
+   **read-console** with pattern `POST_ITEMS` to capture the JSON.
+6. Pre-filter from alt text before visiting any profile — skip posts where alt mentions: `school`, `course`, `brushes`, `tutorial`, `demo`, `proko`, `brainstorm`, `creative director`, `creatives` (business signals). This saves profile round-trips.
 
 ### 3. Discover Emerging Artists
 
-For each post in the hashtag grid:
+For each remaining post (after pre-filter):
 
-1. **Click on post** to open modal
-2. **Get the username** from the post header
+1. **navigate** to the post URL (`/p/<shortcode>/`)
+2. **run-js** to extract username:
+   ```js
+   [...new Set(Array.from(document.querySelectorAll('a[href]'))
+     .map(a => a.getAttribute('href'))
+     .filter(h => h?.match(/^\/[a-zA-Z0-9_.]+\/$/) && !['reels','popular','explore'].includes(h.replace(/\//g,'')))
+   )];
+   ```
 3. **Navigate to their profile**: `https://www.instagram.com/<username>/`
 4. **Quick filter check**: Followers must be 1,000-50,000
 5. **Extract profile data + 10 recent captions** for AI evaluation
@@ -191,184 +212,35 @@ var caption = h1 ? h1.textContent : '';
 
 Or use the batch method to get captions quickly by navigating to each post URL directly.
 
-### 4. Scrape Qualifying Artist Profile
+### 4. Scrape Qualifying Artist Profile (delegate to subagent)
 
-For each qualifying artist:
+For each qualifying artist (score ≥ 70), spawn the **`artist-scraper`** subagent. It owns profile extraction, the Fast Grid Method (shortcodes + image URLs + alt-text captions + `web_profile_info` for likes/comments/postedAt), the `db save-post` loop, all R2 `images upload` calls, and `job progress` ticks. Keeping this in a subagent prevents per-artist console + CLI output (~50–80KB) from accumulating in main context.
 
-#### a. Extract profile data
-Use **run-js** to extract:
-- Username
-- Full name
-- Bio
-- Followers/following count
-- Posts count
-- Profile picture URL
-
-#### b. Save artist
-```bash
-bun run cli db save-artist '{
-  "username": "<username>",
-  "fullName": "<full_name>",
-  "bio": "<bio>",
-  "followersCount": <number>,
-  "followingCount": <number>,
-  "postsCount": <number>,
-  "isVerified": false
-}'
 ```
-
-#### c. Scrape 10 most recent posts (Fast Grid Method - ~10x faster)
-
-This method extracts image URLs directly from the profile grid and downloads via curl, avoiding the need to click into each post.
-
-**Step 1: Extract shortcodes, URLs, and alt text from grid**
-
-Run this JavaScript to log URLs to console AND return alt text (MCP blocks URLs in return values, but console.log works for URLs while alt text returns normally):
-
-```javascript
-var posts = document.querySelectorAll('a[href*="/p/"]');
-var data = [];
-for(var i=0; i<10 && i<posts.length; i++){
-  var a = posts[i];
-  var img = a.querySelector('img');
-  if(img && img.src){
-    var sc = a.href.split('/p/')[1].split('/')[0];
-    console.log('IMGURL:' + sc + ':' + img.src);
-    data.push({shortcode: sc, alt: img.alt || ''});
-  }
-}
-JSON.stringify(data)
-```
-
-This returns the alt text directly (which IS the artist's caption):
-```json
-[
-  {"shortcode": "DScuKtXDUbp", "alt": "Timeless • 久遠 #kyoto #photography #winter"},
-  {"shortcode": "DTAxm0RDYmT", "alt": "Lost in the atmospheric glow of old Japan #kyoto #photography"}
-]
-```
-
-**Step 1b: Fetch likes/comments via web_profile_info API**
-
-Instagram's profile page DOM does not expose per-post like/comment counts. The undocumented `web_profile_info` endpoint does, uses session cookies, and returns up to ~12 most recent posts in one call. Run on the artist's profile tab (same origin → cookies sent automatically):
-
-```javascript
-fetch('https://i.instagram.com/api/v1/users/web_profile_info/?username=<username>', {
-  headers: {'x-ig-app-id':'936619743392459'}
-}).then(r=>r.json()).then(j=>{
-  var edges = (j.data && j.data.user && j.data.user.edge_owner_to_timeline_media && j.data.user.edge_owner_to_timeline_media.edges) || [];
-  for(var i=0;i<edges.length;i++){
-    var n = edges[i].node;
-    var likes = (n.edge_media_preview_like && n.edge_media_preview_like.count) || (n.edge_liked_by && n.edge_liked_by.count) || 0;
-    var comments = (n.edge_media_to_comment && n.edge_media_to_comment.count) || 0;
-    var ts = n.taken_at_timestamp ? new Date(n.taken_at_timestamp*1000).toISOString() : '';
-    console.log('STATS:'+n.shortcode+':'+likes+':'+comments+':'+ts);
-  }
-  console.log('STATS_DONE:'+edges.length);
-});
-```
-
-Replace `<username>` with the artist's handle. The `x-ig-app-id` header value `936619743392459` is the public web client ID.
-
-**Step 2: Read URLs and stats from console**
-
-Use **read-console** to retrieve both the `IMGURL:` entries from Step 1 and the `STATS:` entries from Step 1b.
-
-- Playwright: `browser_console_messages` (no level filter — filter the result client-side).
-- Claude-in-Chrome: `read_console_messages` (supports a `pattern` regex; pass `IMGURL|STATS` to pre-filter).
-
-Entries look like:
-```
-IMGURL:DTAXX54EZxZ:https://instagram.fsgn2-6.fna.fbcdn.net/v/t51.82787-15/...
-STATS:DTAXX54EZxZ:1234:56:2026-04-21T10:15:00.000Z
-```
-
-Build a map `shortcode → {likes, comments, postedAt}` from the `STATS:` lines, then merge with the grid data from Step 1.
-
-**Step 3: Upload all images to R2**
-
-For each URL extracted, run the CLI uploader. It downloads the CDN bytes and PUTs to R2 under the canonical key `<username>/<shortcode>_<n>.<ext>`, and also writes the key back into the post's `imageKey` column in D1.
-
-```bash
-bun run cli images upload --url "<image_url>" --artist "<username>" --shortcode "<shortcode>" --index 0
-```
-
-Example:
-```bash
-bun run cli images upload \
-  --url "https://instagram.fsgn2-6.fna.fbcdn.net/v/t51.82787-15/610538973_..." \
-  --artist "sofia.portraits" --shortcode "DTAXX54EZxZ" --index 0
-```
-
-**Step 4: Save posts to database with caption + stats**
-
-The alt text from Step 1 serves as the caption (Instagram's auto-generated description). The stats from Step 1b supply likes/comments/postedAt. For each post:
-
-```bash
-bun run cli db save-post '{
-  "shortcode": "<shortcode>",
-  "artistUsername": "<username>",
-  "postType": "image",
-  "caption": "<alt text from grid>",
-  "likesCount": <likes from STATS map>,
-  "commentsCount": <comments from STATS map>,
-  "postedAt": "<ISO timestamp from STATS map>"
-}'
-```
-
-Example with actual data:
-```bash
-bun run cli db save-post '{
-  "shortcode": "DScuKtXDUbp",
-  "artistUsername": "da_frames",
-  "postType": "image",
-  "caption": "Timeless • 久遠 #kyoto #photography #winter",
-  "likesCount": 1234,
-  "commentsCount": 56,
-  "postedAt": "2026-04-21T10:15:00.000Z"
-}'
-```
-
-If a shortcode is missing from the `STATS` map (e.g. older post not returned by `web_profile_info`), omit `likesCount`/`commentsCount` rather than passing `0` — preserves NULL in DB so it's clear data was unavailable vs. zero engagement.
-
-> **Note:** The alt text IS the artist's actual caption when they provide one. Instagram only auto-generates a description (like "May be an image of...") when the artist leaves the caption empty. So this alt text is the primary source for captions.
-
-The `images upload` command in Step 3 already wrote the `imageKey` back to D1 — no extra update step needed.
-
-**Step 5: (Optional) Get full captions/likes for specific posts**
-
-If you need full caption or engagement data, navigate to the post page:
-
-```javascript
-// On post page https://www.instagram.com/p/<shortcode>/
-var article = document.querySelector('article');
-var h1 = article ? article.querySelector('h1') : null;
-var time = document.querySelector('time[datetime]');
-var text = article ? article.textContent : '';
-var idx = text.indexOf('Like');
-var sub = idx >= 0 ? text.substring(idx + 4, idx + 30) : '';
-var likesRaw = sub.split('Comment')[0] || '0';
-function parseCount(s) {
-  s = s.trim();
-  if (s.includes('K')) return Math.round(parseFloat(s) * 1000);
-  if (s.includes('M')) return Math.round(parseFloat(s) * 1000000);
-  return parseInt(s.replace(/,/g, '')) || 0;
-}
-JSON.stringify({
-  caption: h1 ? h1.textContent : null,
-  postedAt: time ? time.getAttribute('datetime') : null,
-  likesCount: parseCount(likesRaw)
+Agent({
+  subagent_type: "artist-scraper",
+  description: "Scrape <username>",
+  prompt: "username: <username>\njob_id: <job_id>\nmax_posts: 10\nmcp: claude-in-chrome"   // or "playwright"
 })
 ```
 
-### Why This Method is Faster
+The subagent's final message ends with one JSON line:
 
-| Old Method | New Method |
-|------------|------------|
-| Navigate to each post (10 page loads) | Stay on profile page |
-| Wait 2s per post (20s total) | Single JS execution |
-| Canvas download + file move | Direct curl download |
-| ~30-40 seconds for 10 posts | ~5 seconds for 10 posts |
+```json
+{"ok":true,"postsScraped":10,"imagesUploaded":11,"profilePicUploaded":true,"errors":[]}
+```
+
+Parse it. On `ok:true`, increment your running `artists_saved_so_far` and emit:
+
+```bash
+bun run cli job progress <job_id> <artists_saved_so_far>
+```
+
+On `ok:false`, log the error, skip this artist, move on (do **not** fail the hashtag job — keep discovering).
+
+**Sequential constraint:** never spawn two `artist-scraper` subagents in parallel. Wait for one to return before invoking the next. Between subagent invocations, sleep 5 seconds (rate-limit cushion).
+
+Subagent body lives at `.agents/agents/artist-scraper.md` (or symlinked `.claude/agents/artist-scraper.md`). For non-Claude harnesses without subagent support, inline that file's body in place of this section.
 
 ### 5. Complete Job
 ```bash

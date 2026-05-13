@@ -66,6 +66,8 @@ postsRoute.patch("/:shortcode/image-key", async (c) => {
   const body = await c.req.json().catch(() => null);
   if (!body || typeof body.key !== "string") return c.json({ error: "key required" }, 400);
   const db = makeDb(c.env.DB);
-  await updatePostImageKey(db, c.req.param("shortcode"), body.key);
+  const shortcode = c.req.param("shortcode");
+  const updated = await updatePostImageKey(db, shortcode, body.key);
+  if (!updated) return c.json({ error: `post not found: ${shortcode}. save-post must run before images upload.` }, 404);
   return c.json({ ok: true });
 });
