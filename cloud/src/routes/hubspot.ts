@@ -85,9 +85,15 @@ hubspotRoute.post("/sync/:username", async (c) => {
     if (contactId) {
       await updateContact(c.env, contactId, props);
     } else {
-      // Stamp lead_source on first create only — re-syncs preserve any manual
-      // edits the outreach team makes in HubSpot.
-      const created = await createContact(c.env, { ...props, lead_source: "REO" });
+      // Stamp lead_source + targetGroup on first create only — re-syncs preserve
+      // any manual edits the outreach team makes in HubSpot.
+      // `product` is the internal name of the "targetGroup" enum property;
+      // "4" = "App visitor".
+      const created = await createContact(c.env, {
+        ...props,
+        lead_source: "REO",
+        product: "4",
+      });
       contactId = created.id;
     }
 
