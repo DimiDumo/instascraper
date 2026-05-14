@@ -30,6 +30,28 @@ export const artists = sqliteTable(
   (table) => [index("idx_artists_username").on(table.username)]
 );
 
+// Rejected artists - evaluated during discovery but deemed not a fit.
+// Kept separate from `artists` so the qualifying-artist table / web UI stay clean.
+// Lets discovery skip known no-fits fast (no profile visit, no AI re-eval).
+export const rejectedArtists = sqliteTable(
+  "rejected_artists",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    username: text("username").notNull().unique(),
+    reason: text("reason", {
+      enum: ["out_of_range", "low_score", "manual_review"],
+    }).notNull(),
+    score: integer("score"),
+    followersCount: integer("followers_count"),
+    primaryReason: text("primary_reason"),
+    sourceHashtag: text("source_hashtag"),
+    evaluatedAt: integer("evaluated_at", { mode: "timestamp" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+    updatedAt: integer("updated_at", { mode: "timestamp" }).$defaultFn(() => new Date()),
+  },
+  (table) => [index("idx_rejected_artists_username").on(table.username)]
+);
+
 // Posts table - Instagram posts
 export const posts = sqliteTable(
   "posts",
@@ -203,6 +225,8 @@ export const generationsRelations = relations(generations, ({ one }) => ({
 
 export type Artist = typeof artists.$inferSelect;
 export type NewArtist = typeof artists.$inferInsert;
+export type RejectedArtist = typeof rejectedArtists.$inferSelect;
+export type NewRejectedArtist = typeof rejectedArtists.$inferInsert;
 export type Post = typeof posts.$inferSelect;
 export type NewPost = typeof posts.$inferInsert;
 export type Image = typeof images.$inferSelect;

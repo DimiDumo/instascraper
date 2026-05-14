@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import { handleSaveArtist } from "./commands/save-artist";
+import { handleCheckArtist, handleSaveRejected } from "./commands/check-artist";
 import { handleSavePost } from "./commands/save-post";
 import { handleUploadImage } from "./commands/download-image";
 import {
@@ -40,6 +41,22 @@ dbCmd
   .argument("<json>", "Post data as JSON string")
   .action(async (json) => {
     await handleSavePost(json);
+  });
+
+dbCmd
+  .command("check-artist")
+  .description("Check if a username is already scraped or rejected (prints JSON)")
+  .argument("<username>", "Instagram username")
+  .action(async (username) => {
+    await handleCheckArtist(username);
+  });
+
+dbCmd
+  .command("save-rejected")
+  .description("Record an artist evaluated during discovery but deemed not a fit")
+  .argument("<json>", "Rejected artist data as JSON string")
+  .action(async (json) => {
+    await handleSaveRejected(json);
   });
 
 // Image commands

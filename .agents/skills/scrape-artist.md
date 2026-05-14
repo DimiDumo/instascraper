@@ -46,6 +46,13 @@ Note the job ID returned.
 bun run cli job start <job_id>
 ```
 
+### 2b. Dedup / staleness check
+```bash
+bun run cli db check-artist <username>
+```
+- `"status":"new"` or `"shouldRefresh":true` → continue to Step 3 (fresh scrape or stale refresh).
+- `"seen":true` with `"shouldRefresh":false` → **skip the scrape**. The artist is fresh (scraped <3 months ago) or already DM'd (`dmStatus:"sent"`), or was previously rejected. Run `bun run cli job complete <job_id> 0`, tell the user why, and stop.
+
 ### 3. Navigate to artist's Instagram profile
 1. **list-tabs** — current tabs
 2. **new-tab** if needed

@@ -2,6 +2,7 @@ import { eq, desc, isNull, sql, and, or, gte, lte } from "drizzle-orm";
 import type { DB } from "./client";
 import {
   artists,
+  rejectedArtists,
   posts,
   images,
   hashtags,
@@ -10,6 +11,7 @@ import {
   prompts,
   generations,
   type NewArtist,
+  type NewRejectedArtist,
   type NewPost,
   type NewImage,
   type NewHashtag,
@@ -24,14 +26,19 @@ export async function upsertArtist(db: DB, data: NewArtist) {
   const existing = await db.query.artists.findFirst({
     where: eq(artists.username, data.username),
   });
+  let result;
   if (existing) {
     await db.update(artists)
       .set({ ...data, scrapedAt: new Date(), updatedAt: new Date() })
       .where(eq(artists.id, existing.id));
-    return { ...existing, ...data };
+    result = { ...existing, ...data };
+  } else {
+    const [row] = await db.insert(artists).values({ ...data, scrapedAt: new Date() }).returning();
+    result = row;
   }
-  const [row] = await db.insert(artists).values({ ...data, scrapedAt: new Date() }).returning();
-  return row;
+  // Promotion path: if this username was previously rejected, drop the stale row.
+  await db.delete(rejectedArtists).where(eq(rejectedArtists.username, data.username));
+  return result;
 }
 
 export async function getArtistByUsername(db: DB, username: string) {
@@ -44,6 +51,73 @@ export async function getArtistById(db: DB, id: number) {
 
 export type DmStatus = "none" | "draft" | "synced" | "ready" | "sent";
 const DM_STATUSES: readonly DmStatus[] = ["none", "draft", "synced", "ready", "sent"];
+
+// Rollup DM status per artist (furthest-in-funnel wins; sticky once sent).
+// Shared by listArtists and getArtistDmStatus. Assumes the artists table is
+// aliased `a` and this aggregate joined as `dm` in the surrounding query.
+const dmAgg = sql`(
+  select g.artist_id as artist_id,
+    max(g.sent_at) as max_sent_at,
+    max(g.ready_to_send_at) as max_ready_at,
+    max(case when g.status = 'done' then 1 end) as has_done
+  from generations g
+  group by g.artist_id
+)`;
+
+const dmStatusExpr = sql`case
+  when dm.max_sent_at is not null then 'sent'
+  when dm.max_ready_at is not null then 'ready'
+  when dm.has_done is not null and a.hubspot_contact_id is not null then 'synced'
+  when dm.has_done is not null then 'draft'
+  else 'none'
+end`;
+
+export async function getArtistDmStatus(db: DB, artistId: number): Promise<DmStatus> {
+  const rows = await db.all<{ dm_status: DmStatus }>(sql`
+    select ${dmStatusExpr} as dm_status
+    from ${artists} a
+    left join ${dmAgg} dm on dm.artist_id = a.id
+    where a.id = ${artistId}
+  `);
+  return (rows[0]?.dm_status ?? "none") as DmStatus;
+}
+
+// ============ REJECTED ARTISTS ============
+
+export async function upsertRejectedArtist(db: DB, data: NewRejectedArtist) {
+  const existing = await db.query.rejectedArtists.findFirst({
+    where: eq(rejectedArtists.username, data.username),
+  });
+  if (existing) {
+    await db.update(rejectedArtists)
+      .set({ ...data, evaluatedAt: data.evaluatedAt ?? new Date(), updatedAt: new Date() })
+      .where(eq(rejectedArtists.id, existing.id));
+    return { ...existing, ...data };
+  }
+  const [row] = await db.insert(rejectedArtists)
+    .values({ ...data, evaluatedAt: data.evaluatedAt ?? new Date() })
+    .returning();
+  return row;
+}
+
+export async function getRejectedArtist(db: DB, username: string) {
+  return db.query.rejectedArtists.findFirst({ where: eq(rejectedArtists.username, username) });
+}
+
+// Combined "have we seen this username?" check used by the scraper skills before
+// doing any browser/AI work. Returns scraped (with dmStatus), rejected, or new.
+export async function getArtistSeenStatus(db: DB, username: string) {
+  const artist = await getArtistByUsername(db, username);
+  if (artist) {
+    const dmStatus = await getArtistDmStatus(db, artist.id);
+    return { status: "scraped" as const, artist, dmStatus };
+  }
+  const rejected = await getRejectedArtist(db, username);
+  if (rejected) {
+    return { status: "rejected" as const, rejected };
+  }
+  return { status: "new" as const };
+}
 
 export async function listArtists(db: DB, opts: {
   limit?: number;
@@ -67,28 +141,7 @@ export async function listArtists(db: DB, opts: {
     );
   }
 
-  // Rollup DM status per artist (furthest-in-funnel wins; sticky once sent).
-  // Built as a LEFT JOIN against an aggregate subquery so drizzle returns the
-  // value cleanly — a correlated subquery in .select() didn't project right.
-  // "synced" sits between draft and ready: artist is in HubSpot but no
-  // generation has been approved for sending yet.
-  const dmAgg = sql`(
-    select g.artist_id as artist_id,
-      max(g.sent_at) as max_sent_at,
-      max(g.ready_to_send_at) as max_ready_at,
-      max(case when g.status = 'done' then 1 end) as has_done
-    from generations g
-    group by g.artist_id
-  )`;
-
-  const dmStatusExpr = sql`case
-    when dm.max_sent_at is not null then 'sent'
-    when dm.max_ready_at is not null then 'ready'
-    when dm.has_done is not null and a.hubspot_contact_id is not null then 'synced'
-    when dm.has_done is not null then 'draft'
-    else 'none'
-  end`;
-
+  // dmAgg / dmStatusExpr are module-level (shared with getArtistDmStatus).
   const filteredStatuses = (dmStatuses ?? []).filter((s): s is DmStatus =>
     DM_STATUSES.includes(s as DmStatus),
   );

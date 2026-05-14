@@ -34,7 +34,17 @@ Note the `id` and `target`. Pass `id` directly to all `bun run cli job progress|
 
 #### `artist` — delegate to subagent
 
-Spawn one `artist-scraper` subagent and pass the contract in the prompt:
+First, dedup check — don't re-scrape someone already known:
+
+```bash
+bun run cli db check-artist <target>
+```
+
+- `"status":"new"` or `"shouldRefresh":true` → scrape (spawn the subagent below).
+- `"status":"scraped"` with `"shouldRefresh":false` → **skip**. The artist is fresh (scraped <3 months ago) or already DM'd (`dmStatus:"sent"`). Run `bun run cli job complete <id> 0` and note "already scraped <scrapedAt>, dmStatus <x> — skipped".
+- `"status":"rejected"` → **skip**. Run `bun run cli job complete <id> 0` and note the reject reason.
+
+When scraping, spawn one `artist-scraper` subagent and pass the contract in the prompt:
 
 ```
 Agent({

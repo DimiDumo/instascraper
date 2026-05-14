@@ -91,14 +91,30 @@ For each remaining post (after pre-filter):
      .filter(h => h?.match(/^\/[a-zA-Z0-9_.]+\/$/) && !['reels','popular','explore'].includes(h.replace(/\//g,'')))
    )];
    ```
-3. **Navigate to their profile**: `https://www.instagram.com/<username>/`
-4. **Quick filter check**: Followers must be 1,000-50,000
-5. **Extract profile data + 10 recent captions** for AI evaluation
-6. **Run AI qualification** using the prompt below
-7. **If score >= 70:** Run the artist scraping flow
-8. **If score 40-69:** Flag for manual review, skip for now
-9. **If score < 40:** Skip and continue to next post
-10. Continue until finding 5-10 qualifying artists
+3. **Dedup check** — *before* visiting the profile:
+   ```bash
+   bun run cli db check-artist <username>
+   ```
+   If the JSON has `"seen":true` (status `scraped` **or** `rejected`), **skip this post entirely** — no profile visit, no AI eval. Move to the next post. This is the fast-path that stops re-scraping known artists.
+4. **Navigate to their profile**: `https://www.instagram.com/<username>/`
+5. **Quick filter check**: Followers must be 1,000-50,000. If outside the range, record the rejection and skip:
+   ```bash
+   bun run cli db save-rejected '{"username":"<username>","reason":"out_of_range","followersCount":<n>,"sourceHashtag":"<hashtag_name>"}'
+   ```
+6. **Extract profile data + 10 recent captions** for AI evaluation
+7. **Run AI qualification** using the prompt below
+8. **If score >= 70:** Run the artist scraping flow
+9. **If score 40-69:** Record as rejected (manual review) and skip:
+   ```bash
+   bun run cli db save-rejected '{"username":"<username>","reason":"manual_review","score":<n>,"followersCount":<n>,"primaryReason":"<ai primary_reason>","sourceHashtag":"<hashtag_name>"}'
+   ```
+10. **If score < 40:** Record as rejected (low score) and skip:
+    ```bash
+    bun run cli db save-rejected '{"username":"<username>","reason":"low_score","score":<n>,"followersCount":<n>,"primaryReason":"<ai primary_reason>","sourceHashtag":"<hashtag_name>"}'
+    ```
+11. Continue until finding 5-10 qualifying artists
+
+> Recording every non-qualifying artist (out-of-range, manual review, low score) means future discovery runs skip them at step 3 without a profile visit or AI re-eval. If an artist is later scraped for real, the cloud auto-clears their `rejected_artists` row.
 
 #### AI-Powered Artist Qualification
 

@@ -53,6 +53,10 @@ export const artists = {
   upsert: (data: Record<string, unknown>) => request<any>("POST", "/api/artists", data),
   get: (username: string) =>
     request<any>("GET", `/api/artists/${encodeURIComponent(username)}/lite`),
+  seen: (username: string) =>
+    request<any>("GET", `/api/artists/${encodeURIComponent(username)}/seen`),
+  reject: (data: Record<string, unknown>) =>
+    request<any>("POST", "/api/artists/rejected", data),
   detail: (username: string) =>
     request<any>("GET", `/api/artists/${encodeURIComponent(username)}`),
   list: (params: Record<string, string | number | undefined> = {}) => {
