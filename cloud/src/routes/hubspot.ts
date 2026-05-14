@@ -88,11 +88,11 @@ hubspotRoute.post("/sync/:username", async (c) => {
       // Stamp lead_source + targetGroup on first create only — re-syncs preserve
       // any manual edits the outreach team makes in HubSpot.
       // `product` is the internal name of the "targetGroup" enum property;
-      // "4" = "App visitor".
+      // "2" = "Artist / Gallery".
       const created = await createContact(c.env, {
         ...props,
         lead_source: "REO",
-        product: "4",
+        product: "2",
       });
       contactId = created.id;
     }
