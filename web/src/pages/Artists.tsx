@@ -1,8 +1,10 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { api, type DmStatus } from "../lib/api";
 import { ArtistCard } from "../components/ArtistCard";
 import { DM_STATUSES, DM_STATUS_BADGE, DM_STATUS_LABEL } from "../lib/dmStatus";
+
+const PAGE_SIZE = 60;
 
 export function Artists() {
   const [search, setSearch] = useState("");
@@ -17,17 +19,40 @@ export function Artists() {
   const validMax = typeof maxFollowers === "number" && Number.isFinite(maxFollowers) ? maxFollowers : undefined;
   const dmStatuses = Array.from(statusFilter).sort();
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["artists", search, validMin, validMax, dmStatuses.join(",")],
-    queryFn: () =>
-      api.listArtists({
-        search: search || undefined,
-        minFollowers: validMin,
-        maxFollowers: validMax,
-        dmStatuses: dmStatuses.length > 0 ? dmStatuses : undefined,
-        limit: 120,
-      }),
-  });
+  const { data, isLoading, fetchNextPage, hasNextPage, isFetchingNextPage } =
+    useInfiniteQuery({
+      queryKey: ["artists", search, validMin, validMax, dmStatuses.join(",")],
+      queryFn: ({ pageParam }) =>
+        api.listArtists({
+          search: search || undefined,
+          minFollowers: validMin,
+          maxFollowers: validMax,
+          dmStatuses: dmStatuses.length > 0 ? dmStatuses : undefined,
+          limit: PAGE_SIZE,
+          offset: pageParam,
+        }),
+      initialPageParam: 0,
+      getNextPageParam: (lastPage, allPages) => {
+        const loaded = allPages.reduce((n, p) => n + p.rows.length, 0);
+        return loaded < lastPage.total ? loaded : undefined;
+      },
+    });
+
+  const total = data?.pages[0]?.total ?? 0;
+  const rows = data?.pages.flatMap((p) => p.rows) ?? [];
+
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el) return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+        fetchNextPage();
+      }
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   const toggleStatus = (s: DmStatus) => {
     setStatusFilter((prev) => {
@@ -43,7 +68,7 @@ export function Artists() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Artists</h1>
-          <p className="text-sm text-muted">{data?.total ?? 0} discovered</p>
+          <p className="text-sm text-muted">{total} discovered</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <input
@@ -102,11 +127,15 @@ export function Artists() {
       {isLoading ? (
         <p className="text-muted">Loading…</p>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-          {data?.rows.map((a) => (
-            <ArtistCard key={a.id} artist={a} />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+            {rows.map((a) => (
+              <ArtistCard key={a.id} artist={a} />
+            ))}
+          </div>
+          <div ref={sentinelRef} className="h-10" />
+          {isFetchingNextPage && <p className="text-muted text-sm">Loading more…</p>}
+        </>
       )}
     </div>
   );
